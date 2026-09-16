@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> // fsync - Gravação em disco
 
 #define TAMANHO_PAGINA 4096   // 4KB
 #define TAMANHO_CABECALHO 16  // 16B   
@@ -27,6 +28,7 @@
 
 /*
   Escreve os 4KB de buffer na página n do arquivo.
+  Armazena os dados em disco a fim de manter a persistência
  */
 
  void escreve_pagina(int n, unsigned char *buffer) {
@@ -36,6 +38,8 @@
     }
     fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
     fwrite(buffer, 1, TAMANHO_PAGINA, f);
+    fflush(f);
+    fsync(fileno(f)); // Envia os dados do buffer para o SO e os grava no disco
     fclose(f);
 }
 
