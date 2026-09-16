@@ -10,61 +10,176 @@
 
 #define ARQUIVO_BD "craft-db.dat"
 
-/*
- Lê 4KB da página n do arquivo e coloca o conteúdo em buffer.
- O buffer deve ter pelo menos 4096 bytes.
- */
-
- void ler_pagina(int n, unsigned char *buffer) {
+// Retorna o tamanho atual do arquivo do banco, em bytes
+static long tamanho_arquivo(void) {
+    long tamanho = 0;
     FILE *f = fopen(ARQUIVO_BD, "rb");
-    if (f == NULL) {
-        memset(buffer, 0, TAMANHO_PAGINA);
-        return;
+    if (f != NULL) {
+        fseek(f, 0, SEEK_END);
+        tamanho = ftell(f);
+        fclose(f);
     }
-    fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
-    fread(buffer, 1, TAMANHO_PAGINA, f);
-    fclose(f);
+    return tamanho;
 }
 
-/*
-  Escreve os 4KB de buffer na página n do arquivo.
-  Armazena os dados em disco a fim de manter a persistência
- */
+// Retorna quantas paginas ja foram alocadas (existem) no arquivo 
+int total_paginas_alocadas(void) {
+    return (int)(tamanho_arquivo() / TAMANHO_PAGINA);
+}
 
- void escreve_pagina(int n, unsigned char *buffer) {
+/* 
+  Escreve 4KB de buffer na posicao da pagina n do arquivo.
+  É usada por escreve_pagina() e aloca_pagina()
+*/
+static int escreve_pagina_bruta(int n, const unsigned char *buffer) {
     FILE *f = fopen(ARQUIVO_BD, "r+b");
     if (f == NULL) {
         f = fopen(ARQUIVO_BD, "w+b");
+        if (f == NULL) {
+            fprintf(stderr, "Erro: nao foi possivel abrir/criar '%s'\n", ARQUIVO_BD);
+            return -1;
+        }
+    }
+
+    fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
+    if (fwrite(buffer, 1, TAMANHO_PAGINA, f) != TAMANHO_PAGINA) {
+        fprintf(stderr, "Erro: falha ao escrever a pagina %d\n", n);
+        fclose(f);
+        return -1;
+    }
+
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+    return 0;
+}
+
+/*
+ Aloca uma nova pagina no fim do arquivo e retorna o numero da pagina recem criada (ou -1 em caso de erro) 
+
+*/
+
+int aloca_pagina(void) {
+    int nova_pagina = total_paginas_alocadas();
+    unsigned char pagina_vazia[TAMANHO_PAGINA];
+    memset(pagina_vazia, 0, TAMANHO_PAGINA);
+
+    if (escreve_pagina_bruta(nova_pagina, pagina_vazia) != 0) {
+        return -1;
+    }
+    return nova_pagina;
+}
+
+/*
+ Garante que os dados mantenham-se persistidos.
+ Retorna 0 em caso de sucesso,ou -1 em caso de erro
+*/
+
+int sincroniza_dados(void) {
+    FILE *f = fopen(ARQUIVO_BD, "r+b");
+    if (f == NULL) {
+        fprintf(stderr, "Erro: nao foi possivel abrir '%s' para sincronizar\n", ARQUIVO_BD);
+        return -1;
+    }
+    fflush(f);
+    if (fsync(fileno(f)) != 0) {
+        fprintf(stderr, "Erro: falha ao sincronizar dados com o disco\n");
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    return 0;
+}
+
+
+/*
+ Lê 4KB da página n do arquivo e para dentro do buffer.
+ Valida o numero da pagina (caso exista) e o tamanho do buffer recebido (deve ser exatamente 4KB).
+ Retorna 0 em caso de sucesso,ou -1 em caso de erro.
+ */
+
+ int ler_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
+    if (buffer == NULL || tamanho_buffer != TAMANHO_PAGINA) {
+        fprintf(stderr, "Erro: buffer invalido (deve ter exatamente %d bytes)\n", TAMANHO_PAGINA);
+        return -1;
+    }
+    if (n < 0 || n >= total_paginas_alocadas()) {
+        fprintf(stderr, "Erro: numero de pagina invalido (%d). Paginas alocadas: %d\n",
+                n, total_paginas_alocadas());
+        return -1;
+    }
+
+    FILE *f = fopen(ARQUIVO_BD, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "Erro: nao foi possivel abrir '%s'\n", ARQUIVO_BD);
+        return -1;
     }
     fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
-    fwrite(buffer, 1, TAMANHO_PAGINA, f);
-    fflush(f);
-    fsync(fileno(f)); // Envia os dados do buffer para o SO e os grava no disco
+    if (fread(buffer, 1, TAMANHO_PAGINA, f) != TAMANHO_PAGINA) {
+        fprintf(stderr, "Erro: falha ao ler a pagina %d\n", n);
+        fclose(f);
+        return -1;
+    }
     fclose(f);
+    return 0;
+}
+
+/*
+  Escreve os 4KB de buffer na página n do arquivo,a qual precisa ter sido alocada previamente.
+  Tambem valida o numero da pagina e o tamanho do buffer recebido.
+  Retorna 0 em caso de sucesso,ou -1 em caso de erro.
+ */
+
+int escreve_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
+    if (buffer == NULL || tamanho_buffer != TAMANHO_PAGINA) {
+        fprintf(stderr, "Erro: buffer invalido (deve ter exatamente %d bytes)\n", TAMANHO_PAGINA);
+        return -1;
+    }
+    if (n < 0 || n >= total_paginas_alocadas()) {
+        fprintf(stderr, "Erro: pagina %d nao foi alocada. Use aloca_pagina() antes de escrever.\n", n);
+        return -1;
+    }
+
+    return escreve_pagina_bruta(n, buffer);
 }
 
 int main(void) {
     int pagina_alvo = 2;
     int slot_alvo = 0;
 
+    /* Garante que as paginas 0, 1 e 2 existam antes de usar a pagina 2 */
+    while (total_paginas_alocadas() <= pagina_alvo) {
+        if (aloca_pagina() < 0) {
+            fprintf(stderr, "Erro ao alocar paginas necessarias.\n");
+            return 1;
+        }
+    }
+
     unsigned char buffer[TAMANHO_PAGINA];
     unsigned char registro[TAMANHO_REGISTRO] = {
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
     };
 
-    // Carrega a página atual 
-    ler_pagina(pagina_alvo, buffer);
+    /* Carrega a página atual (para não sobrescrever o restante do conteúdo) */
+    if (ler_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
+        return 1;
+    }
 
-    // Calcula o deslocamento do slot dentro da página,após o cabeçalho 
+    /* Calcula o deslocamento do slot dentro da página, após o cabeçalho */
     int offset_na_pagina = TAMANHO_CABECALHO + slot_alvo * TAMANHO_REGISTRO;
 
-    // Copia o registro para a posição do slot dentro do buffer da página
+    /* Copia o registro para a posição do slot dentro do buffer da página */
     memcpy(buffer + offset_na_pagina, registro, TAMANHO_REGISTRO);
 
-    //  Grava a página de volta no arquivo 
-    escreve_pagina(pagina_alvo, buffer);
+    /* Grava a página de volta no arquivo (já sincroniza com o disco) */
+    if (escreve_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
+        return 1;
+    }
 
-    // Calcula o byte no arquivo onde o registro foi gravado 
+    /* Sincronização explícita adicional, garantindo persistência total */
+    sincroniza_dados();
+
+    /* Calcula o byte absoluto no arquivo onde o registro foi gravado */
     long byte_absoluto = (long)pagina_alvo * TAMANHO_PAGINA + offset_na_pagina;
 
     printf("O registro começa no byte: %ld\n", byte_absoluto);
