@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include<stdint.h>
 #include <string.h>
-#include <unistd.h> // fsync - Gravação em Disco
+#include <unistd.h> // fsync - Gravação em Disco 
 #include<fcntl.h> // struct flock - Isolamento de Páginas
 
 #define TAMANHO_PAGINA 4096   // 4KB
@@ -10,6 +11,13 @@
 #define REGISTROS_POR_PAGINA ((TAMANHO_PAGINA - TAMANHO_CABECALHO) / TAMANHO_REGISTRO) // 510B
 
 #define ARQUIVO_BD "craft-db.dat"
+
+/* Struct utilizada para operações de serialização e desserialização */
+
+typedef struct {
+    int32_t id;
+    int32_t valor;
+} Registro;
 
 // Retorna o tamanho atual do arquivo do banco, em bytes
 static long tamanho_arquivo(void) {
@@ -124,6 +132,32 @@ int sincroniza_dados(void) {
     return 0;
 }
 
+/* Escreve um uint32_t em 4 bytes, sempre em little-endian, byte a byte.
+ * Nao depende do endianness nativo da CPU (nao usa memcpy nem union). */
+static void serializa_uint32_le(uint32_t valor, unsigned char *destino) {
+    destino[0] = (unsigned char)(valor & 0xFF);
+    destino[1] = (unsigned char)((valor >> 8) & 0xFF);
+    destino[2] = (unsigned char)((valor >> 16) & 0xFF);
+    destino[3] = (unsigned char)((valor >> 24) & 0xFF);
+}
+
+/* Le 4 bytes em little-endian e reconstroi o uint32_t original. */
+static uint32_t desserializa_uint32_le(const unsigned char *origem) {
+    return   (uint32_t)origem[0]
+           | ((uint32_t)origem[1] << 8)
+           | ((uint32_t)origem[2] << 16)
+           | ((uint32_t)origem[3] << 24);
+}
+
+void serializa_registro(const Registro *registro, unsigned char *buffer) {
+    serializa_uint32_le((uint32_t)registro->id, buffer);
+    serializa_uint32_le((uint32_t)registro->valor, buffer + 4);
+}
+
+void desserializa_registro(const unsigned char *buffer, Registro *registro) {
+    registro->id    = (int32_t)desserializa_uint32_le(buffer);
+    registro->valor = (int32_t)desserializa_uint32_le(buffer + 4);
+}
 
 /*
  Lê 4KB da página n do arquivo e para dentro do buffer.
@@ -225,6 +259,19 @@ int main(void) {
     long byte_absoluto = (long)pagina_alvo * TAMANHO_PAGINA + offset_na_pagina;
 
     printf("O registro começa no byte: %ld\n", byte_absoluto);
+
+    /* Serializa e desserializa um registro */
+
+    Registro registro_bruto = { .id = 1, .valor = 20260001 };
+    unsigned char registro_bytes[TAMANHO_REGISTRO];
+    serializa_registro(&registro_bruto,registro_bytes);
+
+    unsigned char pagina_lida[TAMANHO_PAGINA];
+    Registro registro_lido;
+    ler_pagina(pagina_alvo, pagina_lida, sizeof(pagina_lida));
+    desserializa_registro(pagina_lida + offset_na_pagina, &registro_lido);
+    printf("Registro relido do disco e desserializado: id=%d, valor=%d\n",
+           registro_lido.id, registro_lido.valor);
 
     return 0;
 }
