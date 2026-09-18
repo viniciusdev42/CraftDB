@@ -223,6 +223,27 @@ static uint32_t desserializa_uint32_le(const unsigned char *origem) {
 }
 ```
 
+O `hexdump` é a forma de representar os dados binários (como arquivos,blocos de memória) em formato hexadecimal,sendo acompanhada por um texto `ASCII`.
+
+Em vez de exibir dados brutos de forma ininteligível, o hexdump divide o conteúdo em linhas que mostram:
+
+O endereço do byte inicial (offset).
+
+Os valores dos bytes em hexadecimal (cada byte de 00 a FF).
+
+A representação em caracteres imprimíveis correspondentes à direita.
+
+A relação entre o hexdump e a serialização e desserialização está na inspeção e no entendimento dos dados brutos.Como a serialização resulta em um fluxo de bytes, o hexdump serve como uma ferramenta de diagnóstico essencial.
+
+Ao rodar o comando `hexdump -C -s 8192 -n craft-db.dat` é possível observar os seguintes dados:
+
+``` Shell
+00002000  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+00002010  01 02 03 04 05 06 07 08  00 00 00 00 00 00 00 00  |................|
+00002020
+```
+O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página 2.Já o valor `00002010` representa o byte **8208**.
+
 ### Suíte de Testes
 
 Encontra-se no diretório `Test/M1`.
