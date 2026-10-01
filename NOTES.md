@@ -248,7 +248,7 @@ O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página
 
 Encontra-se no diretório `Test/M1`.
 
-Nela,temos um arquivo `m-1-test.c` independente,com o seu próprio `main`,que está ligado à bilbioteca `m-1.c`,a qual é usada por `m-1-main.c`.
+Nela,temos um arquivo `m-1-test.c` independente,com o seu próprio `main`,que está ligado à biblioteca `m-1.c`,a qual é usada por `m-1-main.c`.
 
 Cada funcionalidade ganhou uma função de teste dedicada (alocação, validação, leitura/escrita, isolamento, serialização, sincronização, persistência), usando uma pequena infraestrutura própria (`verifica`/`VERIFICA`) que registra sucesso ou falha sem interromper a execução dos demais testes.
 
@@ -276,9 +276,9 @@ A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir
 
 O Módulo 2 adota três decisões:
 
-# 1.Política de Substituição LRU (Least Recently Used):É usada para escolher as páginas candidatas à expulsão
-# 2.Política STEAL:É usada para expulsar páginas sujas desde que elas estejam gravadas no disco antes da expulsão
-# 3.Política NO-FORCE:É usada para evitar a gravação obrigatória de uma página no momento da expulsão.
+ 1.Política de Substituição LRU (Least Recently Used):É usada para escolher as páginas candidatas à expulsão
+ 2.Política STEAL:É usada para expulsar páginas sujas desde que elas estejam gravadas no disco antes da expulsão
+ 3.Política NO-FORCE:É usada para evitar a gravação obrigatória de uma página no momento da expulsão.
 
 Isso permite que Ele controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
 
@@ -473,3 +473,12 @@ static int _expulsa(void) {
 Escolha o frame sem fixações,cuja página foi usada há mais tempo.
 
 Caso a página esteja suja,ela é gravada em disco por meio da função `descarrega()` antes do frame ser liberado,seguindo a política STEAL.
+
+Dentre todas as funcionalidades,esta envolve a decisão mais difícil,a qual se refere à durabilidade do CraftDB.
+
+Uma página fixada não pode ser processada por essa função devido ao bloco `if (cache.frames[i].fixacoes > 0){ continue;}`. Além disso,a política STEAL não lida com erros de E/S que podem ocasionar em falhas de gravação. Sendo assim,o bloco de código `if(descarrega(cache.frames[idx_vitima].pagina) != 0)` aborta a expulsão e retorna -1. Essa decisão favorece a durabilidade,mas prejudica a disponibilidade pois se as páginas sujas não podem ser gravadas em caso de falha de disco,o cache pode ficar temporariamente incapaz de atender novas fixações.
+
+### Conclusões
+
+O planejamento e desenvolvimento deste módulo ocorreu de modo ágil,sendo guiado pela implementação das políticas STEAL,NO-FORCE e LRU. Ao implementar Cache no CraftDB evita-se acessos desnecessários ao disco e controla-se quantas páginas precisam ser persistidas.
+
