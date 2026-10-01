@@ -262,3 +262,214 @@ A complexidade **não cresceu de forma computacional**:todas as operações cont
 
 Essa progressão espelha, em miniatura, como sistemas de armazenamento reais evoluem,indo de um mecanismo bruto de leitura/escrita, para uma camada com validação defensiva, depois para uma camada com garantias de durabilidade, depois para gerenciamento de espaço (alocação), depois para segurança sob concorrência, e só então para um formato de dados portátil e testável.
 
+# Módulo 2
+
+O Módulo 2 implementa **Cache** seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
+
+Inicialmente,o Módulo 2 só implementou a estrutura de frames e cache de páginas adotando as políticas STEAL e NO-FORCE.Durante o desenvolvimento do Módulo foram definidos 4 Frames,a fim de validar a função `_expulsa()`.
+
+A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir que o Cache possa gravar as Páginas Sujas no disco antes de um `COMMIT`,o qual pode gravá-las **posteriormente**. Além disso,o CraftDB implementará `Logs` no Módulo 6.
+
+## Descrição
+
+### Visão Geral
+
+O Módulo 2 adota três decisões:
+
+# 1.Política de Substituição LRU (Least Recently Used):É usada para escolher as páginas candidatas à expulsão
+# 2.Política STEAL:É usada para expulsar páginas sujas desde que elas estejam gravadas no disco antes da expulsão
+# 3.Política NO-FORCE:É usada para evitar a gravação obrigatória de uma página no momento da expulsão.
+
+Isso permite que Ele controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
+
+O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `M2.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
+
+### Frames
+
+``` C
+typedef struct {
+    int pagina;                           
+    unsigned char dados[TAMANHO_PAGINA];   
+    int fixacoes;                        
+    int suja;                           
+    long ultimo_uso;                    
+} Frame;
+```
+
+Cada página ocupa um frame. 
+
+Eles são responsáveis por armazenar os dados temporariamente de acordo com o número da página,o contador de fixações,o indicador de página suja e o timestamp lógico do último uso.
+
+### Cache de Páginas
+
+``` C
+typedef struct {
+    Frame frames[NUM_FRAMES];
+    int capacidade;   
+    int uso;          
+    long relogio;      
+    long acertos;      
+    long faltas;      
+} CachePaginas;
+```
+
+É a estrutura do Cache.
+
+Ela armazena um array de frames disponíveis para armazenar páginas,a quantidade máxima de páginas que podem permanecer residentes,a quantidade atual de frames ocupados,a quantidade de acertos e erros,e o contador lógico usado pelo LRU.
+
+### Gravação de Página Suja
+
+``` C
+int descarrega(int n) {
+    inicializa_cache();
+    int idx = busca_frame(n);
+    if (idx == -1) {
+        return 0; 
+    }
+    if (!cache.frames[idx].suja) {
+        return 0; 
+    }
+
+    if (escreve_pagina(n, cache.frames[idx].dados, TAMANHO_PAGINA) != 0) {
+        fprintf(stderr, "Erro: falha ao descarregar a pagina %d para o disco\n", n);
+        return -1;
+    }
+
+    cache.frames[idx].suja = 0;
+    return 0;
+}
+```
+
+Grava o frame que está na página suja `n`.
+
+Após a escrita a página deixa de estar suja.
+
+### Pin
+
+``` C
+unsigned char *fixa(int n) {
+    inicializa_cache();
+
+    if (n < 0 || n >= total_paginas_alocadas()) {
+        fprintf(stderr, "Erro: tentativa de fixar pagina invalida (%d)\n", n);
+        return NULL;
+    }
+
+    int idx = busca_frame(n);
+    if (idx != -1) {
+        // ACERTO: a pagina ja esta em cache -> devolve a mesma referencia
+        cache.acertos++;
+        cache.frames[idx].fixacoes++;
+        cache.frames[idx].ultimo_uso = ++cache.relogio;
+        return cache.frames[idx].dados;
+    }
+
+    cache.faltas++;
+
+    if (cache.uso >= cache.capacidade) {
+        idx = _expulsa();
+        if (idx == -1) {
+            return NULL; // cache cheio, todos os frames fixados
+        }
+    } else {
+        for (int i = 0; i < cache.capacidade; i++) {
+            if (cache.frames[i].pagina == -1) {
+                idx = i;
+                break;
+            }
+        }
+    }
+
+    if (ler_pagina(n, cache.frames[idx].dados, TAMANHO_PAGINA) != 0) {
+        fprintf(stderr, "Erro: falha ao carregar a pagina %d no cache\n", n);
+        return NULL;
+    }
+
+    cache.frames[idx].pagina = n;
+    cache.frames[idx].suja = 0;
+    cache.frames[idx].fixacoes = 1;
+    cache.frames[idx].ultimo_uso = ++cache.relogio;
+    cache.uso++;
+
+    return cache.frames[idx].dados;
+}
+```
+
+Fixa a página `n` no Cache e retorna um ponteiro para o seu buffer de 4KB.
+
+Caso a página esteja em algum frame,o contador de fixações é incrementado e a mesma referência é retornada a essa página,em vez de uma cópia nova.
+
+Caso um frame que esteja sendo procurado não seja encontrado,ele é liberado de acordo com as políticas STEAL e NO-FORCE.
+
+### Unpin
+
+``` C
+int solta(int n, int suja) {
+    inicializa_cache();
+
+    int idx = busca_frame(n);
+    if (idx == -1) {
+        fprintf(stderr, "Erro: tentativa de soltar a pagina %d, que nao esta em cache\n", n);
+        return -1;
+    }
+    if (cache.frames[idx].fixacoes <= 0) {
+        fprintf(stderr, "Erro: pagina %d ja estava solta (fixacoes == 0)\n", n);
+        return -1;
+    }
+
+    cache.frames[idx].fixacoes--;
+    if (suja) {
+        cache.frames[idx].suja = 1;
+    }
+    return 0;
+}
+
+```
+
+Decrementa o contador de fixações.
+
+### LRU
+
+``` C
+static int _expulsa(void) {
+    int idx_vitima = -1;
+    long menor_uso = 0;
+
+    for (int i = 0; i < cache.capacidade; i++) {
+        if (cache.frames[i].pagina == -1) {
+            continue; 
+        }
+        if (cache.frames[i].fixacoes > 0) {
+            continue; 
+        }
+        if (idx_vitima == -1 || cache.frames[i].ultimo_uso < menor_uso) {
+            idx_vitima = i;
+            menor_uso = cache.frames[i].ultimo_uso;
+        }
+    }
+
+    if (idx_vitima == -1) {
+        fprintf(stderr, "Erro: cache cheio e nao ha frames elegiveis para expulsao (todos fixados)\n");
+        return -1;
+    }
+
+    if (cache.frames[idx_vitima].suja) {
+        if (descarrega(cache.frames[idx_vitima].pagina) != 0) {
+            fprintf(stderr, "Erro: falha ao gravar pagina suja %d antes da expulsao\n",
+                    cache.frames[idx_vitima].pagina);
+            return -1;
+        }
+    }
+
+    cache.frames[idx_vitima].pagina = -1;
+    cache.frames[idx_vitima].suja = 0;
+    cache.frames[idx_vitima].fixacoes = 0;
+    cache.uso--;
+
+    return idx_vitima;
+}
+```
+
+Escolha o frame sem fixações,cuja página foi usada há mais tempo.
+
+Caso a página esteja suja,ela é gravada em disco por meio da função `descarrega()` antes do frame ser liberado,seguindo a política STEAL.
