@@ -264,23 +264,29 @@ Essa progressão espelha, em miniatura, como sistemas de armazenamento reais evo
 
 # Módulo 2
 
-O Módulo 2 implementa **Cache** seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
+O Módulo 2 implementa Cache seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
 
-Inicialmente,o Módulo 2 só implementou a estrutura de frames e cache de páginas adotando as políticas STEAL e NO-FORCE.Durante o desenvolvimento do Módulo foram definidos 4 Frames,a fim de validar a função `_expulsa()`.
+Inicialmente,o Módulo 2 só implementou a estrutura de frames e cache de páginas adotando as políticas STEAL e NO-FORCE.
 
-A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir que o Cache possa gravar as Páginas Sujas no disco antes de um `COMMIT`,o qual pode gravá-las **posteriormente**. Além disso,o CraftDB implementará `Logs` no Módulo 6.
+Durante o desenvolvimento do Módulo foram definidos 4 frames,a fim de validar a função `_expulsa()`.
+
+A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir que o Cache possa gravar as páginas sujas no disco antes de um `COMMIT`,o qual pode gravá-las **posteriormente**. 
+
+Além disso,o CraftDB implementará `Logs` no Módulo 6.
 
 ## Descrição
 
 ### Visão Geral
 
-O Módulo 2 adota três decisões:
+O Módulo 2 adota três políticas:
 
- 1.Política de Substituição LRU (Least Recently Used):É usada para escolher as páginas candidatas à expulsão
- 2.Política STEAL:É usada para expulsar páginas sujas desde que elas estejam gravadas no disco antes da expulsão
- 3.Política NO-FORCE:É usada para evitar a gravação obrigatória de uma página no momento da expulsão.
+1. Política de Substituição LRU (**Least Recently Used**):É usada para escolher as páginas candidatas à expulsão
 
-Isso permite que Ele controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
+2. Política STEAL:É usada para expulsar páginas sujas desde que elas estejam gravadas no disco antes da expulsão
+ 
+3. Política NO-FORCE:É usada para evitar a gravação obrigatória de uma página no momento da expulsão.
+
+Isso permite que o Módulo controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
 
 O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `M2.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
 
@@ -478,7 +484,18 @@ Dentre todas as funcionalidades,esta envolve a decisão mais difícil,a qual se 
 
 Uma página fixada não pode ser processada por essa função devido ao bloco `if (cache.frames[i].fixacoes > 0){ continue;}`. Além disso,a política STEAL não lida com erros de E/S que podem ocasionar em falhas de gravação. Sendo assim,o bloco de código `if(descarrega(cache.frames[idx_vitima].pagina) != 0)` aborta a expulsão e retorna -1. Essa decisão favorece a durabilidade,mas prejudica a disponibilidade pois se as páginas sujas não podem ser gravadas em caso de falha de disco,o cache pode ficar temporariamente incapaz de atender novas fixações.
 
+### Suíte de Testes
+
+Localiza-se no diretório `M2` de `Test`.Nela,temos três arquivos C:`teste_01,teste_02,teste_03`.
+
+O `teste_01.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
+
+O `teste_02.c` testa o cache com a capacidade reduzida de 3 frames.Ele verifica se ao tocar 4 páginas distintas com um cache de apenas 3 frames,a página que for expulsa será exatamente a usada menos recentemente (LRU),em vez da primeira que entrou (FIFO).
+
+O `teste_03.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
+
+O `test_script.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux.Ele compila e executa a suíte dos testes de aceitação do M2.
+
 ### Conclusões
 
-O planejamento e desenvolvimento deste módulo ocorreu de modo ágil,sendo guiado pela implementação das políticas STEAL,NO-FORCE e LRU. Ao implementar Cache no CraftDB evita-se acessos desnecessários ao disco e controla-se quantas páginas precisam ser persistidas.
-
+O Cache é uma importante etapa no desenvolvimento de um SGBD,pois ele permite que bancos de dados possam acessar arquivos com muito mais eficiência.Ao desenvolver esse módulo foi necessário seguir as políticas STEAL e NO-FORCE,além do LRU.Se não fosse por essas especificações o banco poderia gravar em disco páginas sujas de transações que ainda não realizaram o COMMIT (STEAL) ou não ser capaz de gravar as páginas alteradas por uma transação em um COMMIT (NO-FORCE).Além disso,em caso de cache cheio,usar FIFO em vez de LRU significaria que um cache hit não alteraria a fila,ao contrário do LRU onde cada cache hit devolveria a página para o fim da fila.
