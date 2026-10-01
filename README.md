@@ -18,6 +18,12 @@ Trata-se de um **Sistema de Armazenamento de Páginas**,o qual é responsável p
 
 #### Módulo 2 - Cache de Páginas
 
+Trata-se de um mecanismo de **Cache**,o qual é responsável por acelerar as leituras realizadas pelo CraftDB às páginas.
+
+Ele adota as políticas **STEAL** e **NO-FORCE**,junto do algoritmo **LRU**.Dessa forma,as páginas sujas podem ser gravadas em disco antes de um `COMMIT`.
+
+Esse módulo servirá de suporte aos `Logs` do **Módulo 6**.
+
 #### Módulo 3 - Árvore B+
 
 #### Módulo 4 - Parser & Catálogo
@@ -38,11 +44,11 @@ Trata-se de um **Sistema de Armazenamento de Páginas**,o qual é responsável p
 
 Este projeto foi desenvolvido com o auxílio dos seguintes modelos de IA Generativa:
 
-1.**Anthropic Claude Sonnet 5**
+1.**Anthropic Claude Sonnet 5.5**
 
 2.**OpenAI ChatGPT 5.6 Luna**
 
-3.**Google Gemini 3.5 Flash**
+3.**Google Gemini 3.5 Flash Lite**
 
 A sua utilização foi voltada aos seguintes campos:
 
