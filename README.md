@@ -26,6 +26,10 @@ Esse módulo servirá de suporte aos `Logs` do **Módulo 6**.
 
 #### Módulo 3 - Árvore B+
 
+Trata-se de uma estrutura de dados que armazena registros do tipo `int32`. Nela,um nó é uma página de 4KB,o qual armazena o tipo (`INTERNO(0) OU FOLHA(1)`),o número de chaves e um ponteiro para o próximo nó.
+
+Na Árvore B+ o número de chaves por nó é 3. Escolheu-se esse valor para fins didáticos pois com ele é fácil observar as divisões de nó. Além disso,com uma ordem 3,cerca de 99% da página fica vazia ao inserir 20.000 chaves,o que mantém a Árvore B+ com uma altura de 10.
+
 #### Módulo 4 - Parser & Catálogo
 
 #### Módulo 5 - Executor
