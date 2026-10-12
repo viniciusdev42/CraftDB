@@ -499,3 +499,211 @@ O `test_script.sh` é um arquivo de Shell Script que só pode ser executado em a
 ### Conclusões
 
 O Cache é uma importante etapa no desenvolvimento de um SGBD,pois ele permite que bancos de dados possam acessar arquivos com muito mais eficiência.Ao desenvolver esse módulo foi necessário seguir as políticas STEAL e NO-FORCE,além do LRU.Se não fosse por essas especificações o banco poderia gravar em disco páginas sujas de transações que ainda não realizaram o COMMIT (STEAL) ou não ser capaz de gravar as páginas alteradas por uma transação em um COMMIT (NO-FORCE).Além disso,em caso de cache cheio,usar FIFO em vez de LRU significaria que um cache hit não alteraria a fila,ao contrário do LRU onde cada cache hit devolveria a página para o fim da fila.
+
+# Módulo 3
+
+O Módulo 3 se trata da implementação de uma `Árvore B+` no CraftDB. Essa estrutura é utilizada com o intuito de **indexação**,acelerando a recuperação de dados armazenados no HDD/SSD e minimizando o número de operações de leitura e escrita (I/O).
+
+## Descrição
+
+### Visão Geral
+
+A Árvore B+ guarda dezenas ou centenas de chaves e ponteiros por nó,o que permite alcançar qualquer dado em poucos saltos,mesmo que haja uma tabela com milhões de registros.
+
+Os bancos de dados utilizam a Árvore B+ em buscas por igualdade (`WHERE`) e por intervalo (`BETWEEN`).
+
+Em uma busca que usa o `WHERE`,o banco começa na raiz e navega pelos nós internos comparando valores até chegar ao nó folha correto. Já que a árvore é balanceada,todas as folhas estão na mesma profundidade,o que garante um tempo de busca extremamente rápido ($\mathcal{O}(\log N)$).
+
+Em uma busca que usa o `BETWEEN`,o banco faz a busca inicial a fim de encontrar o primeiro registro que corresponda ao valor no nó folha. Em seguida,o banco segue os ponteiros horizontais que ligam as folhas vizinhas,em vez de subir de volta pela árvore.
+
+À medida em que registros são inseridos e deletados,a Árvore B+ se auto-balanceia,garantindo que o desempenho do banco não se degrade com o crescimento dos dados.
+
+### Nó
+
+O cabeçalho de um nó é composto por 16 bytes. 
+
+| Bytes | Campo | Descrição |
+|---|---|---
+| 0–3 | `tipo` | `NO_INTERNO` (0) ou `NO_FOLHA` (1) |
+| 4–7 | `num_chaves` | Quantidade de chaves/registros em uso |
+| 8–11 | `proxima` | Folha: próxima folha (ou `-1`); interno: não usado |
+| 12–15 | reservado | **Livre** |
+
+Existem dois tipos de nós:
+
+1. Nós **Internos**: Armazenam apenas chaves e ponteiros para outros nós. Não guardam os dados reais. A sua única função é guiar a busca de forma eficiente.
+
+2. Nós **Folhas**: Ficam todos no nível mais baixo da árvore. Armazenam todas as chaves de busca junto com os ponteiros para os registros de dados. São interligados sequencialmente por ponteiros.
+
+Cada nó no CraftDB armazena até 3 registros (chaves). Com esse valor,cerca de 99% de cada página permanece vazia.
+
+```C
+typedef struct {
+    int32_t  tipo;
+    int32_t  num_chaves;
+    int32_t  proxima;
+    int32_t  chaves[MAX_CHAVES + 1];     // só internos
+    int32_t  filhos[MAX_CHAVES + 2];     // só internos
+    Registro registros[MAX_CHAVES + 1];  // só folhas
+} No;
+```
+
+### Inserção
+
+É uma função **recursiva**,a qual retorna que um nó foi inserido com sucesso,se houve duplicação,divisão ou um erro.
+
+``` C
+static int inserir_registro(int pagina, const Registro *reg, int32_t *chave_promovida, int *nova_pagina) {
+    No no;
+    if (le_no(pagina, &no) != 0) return INSERE_ERRO;
+
+    if (no.tipo == NO_FOLHA) {
+        int pos = 0;
+        while (pos < no.num_chaves && no.registros[pos].id < reg->id) {
+            pos++;
+        }
+        if (pos < no.num_chaves && no.registros[pos].id == reg->id) {
+            return INSERE_DUPLICADO;
+        }
+
+        for (int i = no.num_chaves; i > pos; i--) {
+            no.registros[i] = no.registros[i - 1];
+        }
+        no.registros[pos] = *reg;
+        no.num_chaves++;
+
+        if (no.num_chaves <= MAX_CHAVES) {
+            return (grava_no(pagina, &no) == 0) ? INSERE_OK : INSERE_ERRO;
+        }
+        return dividir_folha(pagina, &no, chave_promovida, nova_pagina);
+    }
+
+    /* No interno: desce para o filho adequado */
+    int i = indice_filho(&no, reg->id);
+    int32_t chave_filho;
+    int pagina_filho;
+    int r = inserir_registro(no.filhos[i], reg, &chave_filho, &pagina_filho);
+    if (r != INSERE_DIVIDIU) {
+        return r;
+    }
+
+    /* O filho dividiu: insere a chave de roteamento e o novo ponteiro aqui */
+    for (int j = no.num_chaves; j > i; j--) {
+        no.chaves[j] = no.chaves[j - 1];
+    }
+    for (int j = no.num_chaves + 1; j > i + 1; j--) {
+        no.filhos[j] = no.filhos[j - 1];
+    }
+    no.chaves[i]     = chave_filho;
+    no.filhos[i + 1] = pagina_filho;
+    no.num_chaves++;
+
+    if (no.num_chaves <= MAX_CHAVES) {
+        return (grava_no(pagina, &no) == 0) ? INSERE_OK : INSERE_ERRO;
+    }
+    return dividir_interno(pagina, &no, chave_promovida, nova_pagina);
+}
+```
+
+### Busca
+
+Busca uma chave na árvore,descendo da raiz até a folha. Retorna 0 se encontrou,1 se a chave existe,ou -1 em caso de erro.
+
+
+``` C
+int buscar_valor(int32_t chave, Registro *saida) {
+    int pagina = le_raiz();
+    if (pagina < 0) return -1;
+
+    No no;
+    for (;;) {
+        if (le_no(pagina, &no) != 0) return -1;
+        if (no.tipo == NO_FOLHA) break;
+        pagina = no.filhos[indice_filho(&no, chave)];
+    }
+
+    for (int i = 0; i < no.num_chaves; i++) {
+        if (no.registros[i].id == chave) {
+            if (saida != NULL) *saida = no.registros[i];
+            return 0;
+        }
+    }
+    return 1;
+}
+```
+
+### Divisão
+
+A divisão ocorre quando um nó possuí um número de chaves maior do que o permitido. Existem dois tipos: a divisão de folha e a de nó interno.
+
+#### Divisão de Folha
+
+A folha original fica com os dois primeiros registros. Uma nova folha recebe os dois últimos registros e é encadeada logo após a original.
+
+Retorna `INSERE_DIVIDIU` em caso de sucesso ou `INSERE_ERRO`.
+
+``` C
+int dividir_folha(int pagina, No *no, int32_t *chave_promovida, int *nova_pagina) {
+    int nova = aloca_pagina();
+    if (nova < 0) return INSERE_ERRO;
+
+    int total = no->num_chaves;          
+    int meio  = (total + 1) / 2;         
+
+    No dir;
+    memset(&dir, 0, sizeof(dir));
+    dir.tipo       = NO_FOLHA;
+    dir.num_chaves = total - meio;
+    for (int i = 0; i < dir.num_chaves; i++) {
+        dir.registros[i] = no->registros[meio + i];
+    }
+
+    dir.proxima = no->proxima;           
+    no->proxima = nova;
+    no->num_chaves = meio;
+
+    if (grava_no(pagina, no) != 0) return INSERE_ERRO;
+    if (grava_no(nova, &dir) != 0) return INSERE_ERRO;
+
+    *chave_promovida = dir.registros[0].id;
+    *nova_pagina = nova;
+    return INSERE_DIVIDIU;
+}
+```
+
+#### Divisão de Interno
+
+O nó original fica com as duas primeiras chaves. A terceira chave sobe para o nó pai. A quarta chave vai para um novo nó.
+
+Retorna `INSERE_DIVIDIU` em caso de sucesso ou `INSERE_ERRO`.
+
+``` C
+int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagina) {
+    int nova = aloca_pagina();
+    if (nova < 0) return INSERE_ERRO;
+
+    int total = no->num_chaves;         
+    int meio  = total / 2;               
+
+    No dir;
+    memset(&dir, 0, sizeof(dir));
+    dir.tipo       = NO_INTERNO;
+    dir.proxima    = SEM_PAGINA;
+    dir.num_chaves = total - meio - 1;
+    for (int i = 0; i < dir.num_chaves; i++) {
+        dir.chaves[i] = no->chaves[meio + 1 + i];
+    }
+    for (int i = 0; i <= dir.num_chaves; i++) {
+        dir.filhos[i] = no->filhos[meio + 1 + i];
+    }
+
+    *chave_promovida = no->chaves[meio];
+    no->num_chaves = meio;
+
+    if (grava_no(pagina, no) != 0) return INSERE_ERRO;
+    if (grava_no(nova, &dir) != 0) return INSERE_ERRO;
+
+    *nova_pagina = nova;
+    return INSERE_DIVIDIU;
+}
+```
