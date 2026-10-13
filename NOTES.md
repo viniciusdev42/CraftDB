@@ -244,7 +244,7 @@ Ao rodar o comando `hexdump -C -s 8192 -n craft-db.dat` é possível observar os
 ```
 O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página 2.Já o valor `00002010` representa o byte **8208**.
 
-### Suíte de Testes
+## Suíte de Testes
 
 Encontra-se no diretório `Test/M1`.
 
@@ -263,6 +263,8 @@ A complexidade **não cresceu de forma computacional**:todas as operações cont
 Essa progressão espelha, em miniatura, como sistemas de armazenamento reais evoluem,indo de um mecanismo bruto de leitura/escrita, para uma camada com validação defensiva, depois para uma camada com garantias de durabilidade, depois para gerenciamento de espaço (alocação), depois para segurança sob concorrência, e só então para um formato de dados portátil e testável.
 
 # Módulo 2
+
+## Introdução
 
 O Módulo 2 implementa Cache seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
 
@@ -484,7 +486,7 @@ Dentre todas as funcionalidades,esta envolve a decisão mais difícil,a qual se 
 
 Uma página fixada não pode ser processada por essa função devido ao bloco `if (cache.frames[i].fixacoes > 0){ continue;}`. Além disso,a política STEAL não lida com erros de E/S que podem ocasionar em falhas de gravação. Sendo assim,o bloco de código `if(descarrega(cache.frames[idx_vitima].pagina) != 0)` aborta a expulsão e retorna -1. Essa decisão favorece a durabilidade,mas prejudica a disponibilidade pois se as páginas sujas não podem ser gravadas em caso de falha de disco,o cache pode ficar temporariamente incapaz de atender novas fixações.
 
-### Suíte de Testes
+## Suíte de Testes
 
 Localiza-se no diretório `M2` de `Test`.Nela,temos três arquivos C:`teste_01,teste_02,teste_03`.
 
@@ -496,11 +498,13 @@ O `teste_03.c` verifica que uma alteração realizada em uma página após esta 
 
 O `test_script.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux.Ele compila e executa a suíte dos testes de aceitação do M2.
 
-### Conclusões
+## Conclusões
 
 O Cache é uma importante etapa no desenvolvimento de um SGBD,pois ele permite que bancos de dados possam acessar arquivos com muito mais eficiência.Ao desenvolver esse módulo foi necessário seguir as políticas STEAL e NO-FORCE,além do LRU.Se não fosse por essas especificações o banco poderia gravar em disco páginas sujas de transações que ainda não realizaram o COMMIT (STEAL) ou não ser capaz de gravar as páginas alteradas por uma transação em um COMMIT (NO-FORCE).Além disso,em caso de cache cheio,usar FIFO em vez de LRU significaria que um cache hit não alteraria a fila,ao contrário do LRU onde cada cache hit devolveria a página para o fim da fila.
 
 # Módulo 3
+
+## Introdução
 
 O Módulo 3 se trata da implementação de uma `Árvore B+` no CraftDB. Essa estrutura é utilizada com o intuito de **indexação**,acelerando a recuperação de dados armazenados no HDD/SSD e minimizando o número de operações de leitura e escrita (I/O).
 
@@ -532,7 +536,6 @@ O cabeçalho de um nó é composto por 16 bytes.
 Existem dois tipos de nós:
 
 1. Nós **Internos**: Armazenam apenas chaves e ponteiros para outros nós. Não guardam os dados reais. A sua única função é guiar a busca de forma eficiente.
-
 2. Nós **Folhas**: Ficam todos no nível mais baixo da árvore. Armazenam todas as chaves de busca junto com os ponteiros para os registros de dados. São interligados sequencialmente por ponteiros.
 
 Cada nó no CraftDB armazena até 3 registros (chaves). Com esse valor,cerca de 99% de cada página permanece vazia.
@@ -607,11 +610,9 @@ static int inserir_registro(int pagina, const Registro *reg, int32_t *chave_prom
 
 Essa foi a funcionalidade mais complexa de se implementar devido aos seguintes fatores:
 
-1. Aritmética dos índices em vetores com tamanhos diferentes: Em um nó interno com n chaves existem n+1 filhos. Quando se insere uma chave de um filho dividido,as chaves são deslocadas com base no `num_chaves` e os filhos com base no `num_chaves` + 1,com a nova chave ficando em `chaves[i]`,enquanto o novo ponteiro vai para `filhos[i+1]`,em vez de `i+1`. Caso ocorra um erro no cálculo do índice (i+1),a árvore é corrompida silenciosamente,sem causar um travamento no programa.
-
-2. Divisão do nó interno: É o que mais exige raciocínio,pois envolve escolher o índice que sobe (`meio = total/2`),calcular o número de chaves e o número de filhos que vão para a direita (`total = meio -1`) e garantir que as entradas restantes no nó esquerdo sejam ignoradas pela serialização.
-
-3.Recursão com múltiplos retornos: A função retorna `OK,DUPLICADO,ERRO` ou `DIVIDIU`,porém essa propagação só funciona se cada nível tratar corretamente cada caso.
+1. **Aritmética dos índices em vetores com tamanhos diferentes**: Em um nó interno com n chaves existem n+1 filhos. Quando se insere uma chave de um filho dividido,as chaves são deslocadas com base no `num_chaves` e os filhos com base no `num_chaves` + 1,com a nova chave ficando em `chaves[i]`,enquanto o novo ponteiro vai para `filhos[i+1]`,em vez de `i+1`. Caso ocorra um erro no cálculo do índice (i+1),a árvore é corrompida silenciosamente,sem causar um travamento no programa.
+2. **Divisão do nó interno**: É o que mais exige raciocínio,pois envolve escolher o índice que sobe (`meio = total/2`),calcular o número de chaves e o número de filhos que vão para a direita (`total = meio -1`) e garantir que as entradas restantes no nó esquerdo sejam ignoradas pela serialização.
+3. **Recursão com múltiplos retornos**: A função retorna `OK,DUPLICADO,ERRO` ou `DIVIDIU`,porém essa propagação só funciona se cada nível tratar corretamente cada caso.
 
 ### Busca
 
@@ -719,18 +720,12 @@ int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagi
 ## Observações
 
 1. A ordem 3 com páginas de 4KB **limita o uso de cada página**. Se a árvore possuir 20.000 chaves,a sua altura será de 10. Se houver 1 milhão,a estimativa é de 12 níveis. Se a ordem fosse de 255,a altura seria de apenas 3 níveis mesmo com 20.000 chaves.
-
 2. Falta **atomicidade nas divisões**: Uma divisão grava esquerda → direita → pai (→ raiz → meta). Uma falha entre as gravações deixa a árvore inconsistente (folha nova existe, mas o pai não aponta para ela,gerando registros inalcançáveis por busca). Só o Log (WAL) pode resolver.
-
-3.Falta **remoção e atualização**: No momento não há `DELETE` ou `UPDATE`. Se uma chave existente for inserida,um erro de duplicidade será retornado.
-
-4.Tipagem **limitada**: Só há chaves `int32`. Falta suporte a chaves de texto,composta ou duplicadas (o que permitiria índices secundários).
-
+3. Falta **remoção e atualização**: No momento não há `DELETE` ou `UPDATE`. Se uma chave existente for inserida,um erro de duplicidade será retornado.
+4. Tipagem **limitada**: Só há chaves `int32`. Falta suporte a chaves de texto,composta ou duplicadas.
 5. Páginas alocadas **serão perdidas em caso de erro**: Se `grava_no` falha depois de `aloca_pagina`,a página fica vazia.
-
-6.Não há **verificação de layout** em tempo de compilação: Se `MAX_CHAVES` for aumentado demais,os nó passam de 4KB sem houver aviso. Falta `static_assert` que limite as chaves em nó internos e folhas.
-
-7.Falta **concorrência**: A árvore não é thread-safe e nem possuí locks.
+6. Não há **verificação de layout** em tempo de compilação: Se `MAX_CHAVES` for aumentado demais,os nó passam de 4KB sem houver aviso. Falta `static_assert` que limite as chaves em nó internos e folhas.
+7. Falta **concorrência**: A árvore não é thread-safe e nem possuí locks.
 
 ## Conclusões
 
@@ -738,21 +733,16 @@ A Árvore B+ é uma estrutura de dados persistente e integrada ao chave que func
 
 É possível utilizá-la para realizar buscas por igualdade,inserções em ordem e persistência. Há dois modos possíveis de uso:
 
-1.Índice agrupado (clustered): O `Registro` é a própria linha. Esse modo serve como armazenamento de tabela com duas colunas.
-
-2.Índice não agrupado (ponteiro para heap): Usa o `id` como chave indexada e o `valor` como identificador (posição da linha). 
+1. **Índice agrupado**: O `Registro` é a própria linha. Esse modo serve como armazenamento de tabela com duas colunas.
+2. **Índice não agrupado** : Usa o `id` como chave indexada e o `valor` como identificador (posição da linha). 
 
 No entanto,o Módulo 3 ainda não está pronto para ser usado como índice geral devido a ausência de recursos de remoção,atualização,varredura por faixa e recuperação após falhas.
 
 Para que seja um índice completo são necessárias as seguintes funcionalidades:
 
-1. Iterador de faixa: Habilita `BETWEEN,<,>,ORDER BY`
-
-2.Atualização de valor: Habilita `UPDATE`
-
-3.Remoção com fusão e redistribuição: Habilita `DELETE`
-
-4.Chaves duplicadas e compostas
-
-5.Atomicidade de divisões
+1. **Iterador de faixa**: Habilita `BETWEEN,<,>,ORDER BY`
+2. **Atualização de valor**: Habilita `UPDATE`
+3. **Remoção com fusão e redistribuição**: Habilita `DELETE`
+4. **Chaves duplicadas e compostas**
+5. **Atomicidade de divisões**
 
