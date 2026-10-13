@@ -512,7 +512,7 @@ A Árvore B+ guarda dezenas ou centenas de chaves e ponteiros por nó,o que perm
 
 Os bancos de dados utilizam a Árvore B+ em buscas por igualdade (`WHERE`) e por intervalo (`BETWEEN`).
 
-Em uma busca que usa o `WHERE`,o banco começa na raiz e navega pelos nós internos comparando valores até chegar ao nó folha correto. Já que a árvore é balanceada,todas as folhas estão na mesma profundidade,o que garante um tempo de busca extremamente rápido ($\mathcal{O}(\log N)$).
+Em uma busca que usa o `WHERE`,o banco começa na raiz e navega pelos nós internos comparando valores até chegar ao nó folha correto. Já que a árvore é balanceada,todas as folhas estão na mesma profundidade,o que garante um tempo de busca extremamente rápido(O(Log (N))).
 
 Em uma busca que usa o `BETWEEN`,o banco faz a busca inicial a fim de encontrar o primeiro registro que corresponda ao valor no nó folha. Em seguida,o banco segue os ponteiros horizontais que ligam as folhas vizinhas,em vez de subir de volta pela árvore.
 
@@ -604,6 +604,14 @@ static int inserir_registro(int pagina, const Registro *reg, int32_t *chave_prom
     return dividir_interno(pagina, &no, chave_promovida, nova_pagina);
 }
 ```
+
+Essa foi a funcionalidade mais complexa de se implementar devido aos seguintes fatores:
+
+1. Aritmética dos índices em vetores com tamanhos diferentes: Em um nó interno com n chaves existem n+1 filhos. Quando se insere uma chave de um filho dividido,as chaves são deslocadas com base no `num_chaves` e os filhos com base no `num_chaves` + 1,com a nova chave ficando em `chaves[i]`,enquanto o novo ponteiro vai para `filhos[i+1]`,em vez de `i+1`. Caso ocorra um erro no cálculo do índice (i+1),a árvore é corrompida silenciosamente,sem causar um travamento no programa.
+
+2. Divisão do nó interno: É o que mais exige raciocínio,pois envolve escolher o índice que sobe (`meio = total/2`),calcular o número de chaves e o número de filhos que vão para a direita (`total = meio -1`) e garantir que as entradas restantes no nó esquerdo sejam ignoradas pela serialização.
+
+3.Recursão com múltiplos retornos: A função retorna `OK,DUPLICADO,ERRO` ou `DIVIDIU`,porém essa propagação só funciona se cada nível tratar corretamente cada caso.
 
 ### Busca
 
@@ -707,3 +715,44 @@ int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagi
     return INSERE_DIVIDIU;
 }
 ```
+
+## Observações
+
+1. A ordem 3 com páginas de 4KB **limita o uso de cada página**. Se a árvore possuir 20.000 chaves,a sua altura será de 10. Se houver 1 milhão,a estimativa é de 12 níveis. Se a ordem fosse de 255,a altura seria de apenas 3 níveis mesmo com 20.000 chaves.
+
+2. Falta **atomicidade nas divisões**: Uma divisão grava esquerda → direita → pai (→ raiz → meta). Uma falha entre as gravações deixa a árvore inconsistente (folha nova existe, mas o pai não aponta para ela,gerando registros inalcançáveis por busca). Só o Log (WAL) pode resolver.
+
+3.Falta **remoção e atualização**: No momento não há `DELETE` ou `UPDATE`. Se uma chave existente for inserida,um erro de duplicidade será retornado.
+
+4.Tipagem **limitada**: Só há chaves `int32`. Falta suporte a chaves de texto,composta ou duplicadas (o que permitiria índices secundários).
+
+5. Páginas alocadas **serão perdidas em caso de erro**: Se `grava_no` falha depois de `aloca_pagina`,a página fica vazia.
+
+6.Não há **verificação de layout** em tempo de compilação: Se `MAX_CHAVES` for aumentado demais,os nó passam de 4KB sem houver aviso. Falta `static_assert` que limite as chaves em nó internos e folhas.
+
+7.Falta **concorrência**: A árvore não é thread-safe e nem possuí locks.
+
+## Conclusões
+
+A Árvore B+ é uma estrutura de dados persistente e integrada ao chave que funciona como índice de chave primária para inserções e buscas.
+
+É possível utilizá-la para realizar buscas por igualdade,inserções em ordem e persistência. Há dois modos possíveis de uso:
+
+1.Índice agrupado (clustered): O `Registro` é a própria linha. Esse modo serve como armazenamento de tabela com duas colunas.
+
+2.Índice não agrupado (ponteiro para heap): Usa o `id` como chave indexada e o `valor` como identificador (posição da linha). 
+
+No entanto,o Módulo 3 ainda não está pronto para ser usado como índice geral devido a ausência de recursos de remoção,atualização,varredura por faixa e recuperação após falhas.
+
+Para que seja um índice completo são necessárias as seguintes funcionalidades:
+
+1. Iterador de faixa: Habilita `BETWEEN,<,>,ORDER BY`
+
+2.Atualização de valor: Habilita `UPDATE`
+
+3.Remoção com fusão e redistribuição: Habilita `DELETE`
+
+4.Chaves duplicadas e compostas
+
+5.Atomicidade de divisões
+
