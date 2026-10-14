@@ -4,7 +4,7 @@
 #include <unistd.h> /* fsync */
 #include <fcntl.h>  /* fcntl, struct flock - travamento por intervalo de bytes */
 
-#include "m-1.h"
+#include "Header.h"
 
 /* ---------------------------------------------------------------------
  * Funcoes auxiliares internas
