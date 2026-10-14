@@ -8,30 +8,30 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
 echo "Compilando os testes de aceitacao..."
-gcc -std=c11 -Wall -Wextra -o teste_01 teste_01.c || exit 2
-gcc -std=c11 -Wall -Wextra -o teste_02 teste_02.c|| exit 2
-gcc -std=c11 -Wall -Wextra -o teste_03 teste_03.c || exit 2
+gcc -std=c11 -Wall -Wextra -o T1 T1.c || exit 2
+gcc -std=c11 -Wall -Wextra -o T2 T2.c|| exit 2
+gcc -std=c11 -Wall -Wextra -o T3 T3.c || exit 2
 
 FALHAS=0
 
 echo
 echo ">>> Teste 1: 4 frames - multiplas leituras da mesma pagina = uma unica leitura de disco"
 rm -f craft-db.dat
-./teste_01
+./T1
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo
 echo ">>> Teste 2: 3 frames - ao tocar 4 paginas, a menos usada e expulsa (LRU)"
 rm -f craft-db.dat
-./teste_02
+./T2
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo
 echo ">>> Teste 3: alterar + expulsar + reabrir em outro processo => alteracao persiste"
 rm -f craft-db.dat
-./teste_03 escritor
+./T3 escritor
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
-./teste_03 leitor
+./T3 leitor
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo
