@@ -20,7 +20,6 @@
 #define NUM_FRAMES 4   // capacidade do cache: numero de frames (paginas) em memoria
 #endif                 // pode ser sobrescrita em tempo de compilacao (ex.: -DNUM_FRAMES=3),
                         // o que os testes de aceitacao usam para variar a capacidade do cache
-
 typedef struct {
     int pagina;                            // numero da pagina contida no frame (-1 = frame livre)
     unsigned char dados[TAMANHO_PAGINA];   // conteudo da pagina, em memoria
@@ -78,6 +77,7 @@ static int busca_frame(int n) {
  Retorna 0 em caso de sucesso (inclusive quando nao havia nada a gravar),
  ou -1 em caso de erro de escrita.
 */
+
 int descarrega(int n) {
     inicializa_cache();
 
@@ -110,6 +110,7 @@ int descarrega(int n) {
  Retorna o indice do frame liberado (pronto para reuso), ou -1 se nao houver
  nenhum frame elegivel para expulsao (todos os frames estao fixados).
 */
+
 static int _expulsa(void) {
     int idx_vitima = -1;
     long menor_uso = 0;
@@ -164,6 +165,7 @@ static int _expulsa(void) {
  Retorna NULL em caso de erro (numero de pagina invalido, ou cache cheio com
  todos os frames fixados, ou falha de leitura em disco).
 */
+
 unsigned char *fixa(int n) {
     inicializa_cache();
 
@@ -225,6 +227,7 @@ unsigned char *fixa(int n) {
  Retorna 0 em caso de sucesso, ou -1 em caso de erro (pagina nao esta em cache,
  ou ja estava com o contador de fixacoes em zero).
 */
+
 int solta(int n, int suja) {
     inicializa_cache();
 
@@ -248,125 +251,8 @@ int solta(int n, int suja) {
 /*
  Imprime as estatisticas atuais do cache: capacidade, uso, acertos e faltas.
 */
+
 void imprime_estatisticas_cache(void) {
     printf("[cache] capacidade=%d uso=%d acertos=%ld faltas=%ld\n",
            cache.capacidade, cache.uso, cache.acertos, cache.faltas);
-}
-
-int main(void) {
-   int pagina_alvo = 2;
-    int slot_alvo = 0;
-
-    /* Garante que as paginas 0, 1 e 2 existam antes de usar a pagina 2 */
-    while (total_paginas_alocadas() <= pagina_alvo) {
-        if (aloca_pagina() < 0) {
-            fprintf(stderr, "Erro ao alocar paginas necessarias.\n");
-            return 1;
-        }
-    }
-
-    unsigned char buffer[TAMANHO_PAGINA];
-    unsigned char registro[TAMANHO_REGISTRO] = {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
-    };
-
-    /* Carrega a página atual (para não sobrescrever o restante do conteúdo) */
-    if (ler_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
-        return 1;
-    }
-
-    /* Calcula o deslocamento do slot dentro da página, após o cabeçalho */
-    int offset_na_pagina = TAMANHO_CABECALHO + slot_alvo * TAMANHO_REGISTRO;
-
-    /* Copia o registro para a posição do slot dentro do buffer da página */
-    memcpy(buffer + offset_na_pagina, registro, TAMANHO_REGISTRO);
-
-    /* Grava a página de volta no arquivo (já sincroniza com o disco) */
-    if (escreve_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
-        return 1;
-    }
-
-    /* Sincronização explícita adicional, garantindo persistência total */
-    sincroniza_dados();
-
-    /* Calcula o byte absoluto no arquivo onde o registro foi gravado */
-    long byte_absoluto = (long)pagina_alvo * TAMANHO_PAGINA + offset_na_pagina;
-
-    printf("O registro começa no byte: %ld\n", byte_absoluto);
-
-    /* Serializa e desserializa um registro */
-
-    Registro registro_bruto = { .id = 1, .valor = 20260001 };
-    unsigned char registro_bytes[TAMANHO_REGISTRO];
-    serializa_registro(&registro_bruto,registro_bytes);
-
-    unsigned char pagina_lida[TAMANHO_PAGINA];
-    Registro registro_lido;
-    ler_pagina(pagina_alvo, pagina_lida, sizeof(pagina_lida));
-    desserializa_registro(pagina_lida + offset_na_pagina, &registro_lido);
-    printf("Registro relido do disco e desserializado: id=%d, valor=%d\n",
-           registro_lido.id, registro_lido.valor);
-
-    /* === Demonstracao do Cache de Paginas (LRU / STEAL / NO-FORCE) === */
-    printf("\n--- Demonstracao do Cache de Paginas ---\n");
-
-    /* Garante paginas suficientes para forcar expulsao (mais paginas que frames) */
-    while (total_paginas_alocadas() < NUM_FRAMES + 2) {
-        if (aloca_pagina() < 0) {
-            fprintf(stderr, "Erro ao alocar paginas extras para o teste do cache.\n");
-            return 1;
-        }
-    }
-
-    /* fixa(2): primeira vez -> falta (miss) */
-    unsigned char *buf2 = fixa(pagina_alvo);
-    if (buf2 == NULL) return 1;
-
-    Registro lido_via_cache;
-    desserializa_registro(buf2 + offset_na_pagina, &lido_via_cache);
-    printf("[cache] pagina %d fixada -> id=%d, valor=%d\n",
-           pagina_alvo, lido_via_cache.id, lido_via_cache.valor);
-
-    /* Modifica o registro diretamente no buffer do cache e marca a pagina como suja */
-    Registro atualizado = { .id = 99, .valor = 12345 };
-    unsigned char atualizado_bytes[TAMANHO_REGISTRO];
-    serializa_registro(&atualizado, atualizado_bytes);
-    memcpy(buf2 + offset_na_pagina, atualizado_bytes, TAMANHO_REGISTRO);
-
-    solta(pagina_alvo, 1); /* solta marcando suja; NO-FORCE: nao grava ainda */
-
-    /* fixa(2) novamente: deve ser acerto (hit) e devolver a MESMA referencia */
-    unsigned char *buf2_de_novo = fixa(pagina_alvo);
-    printf("[cache] segunda fixacao da pagina %d -> mesma referencia? %s\n",
-           pagina_alvo, (buf2 == buf2_de_novo) ? "sim" : "nao");
-    solta(pagina_alvo, 0);
-
-    /* Fixa e solta outras paginas para exceder a capacidade do cache e forcar
-       expulsoes via LRU, exercitando a politica STEAL sobre a pagina suja acima */
-    for (int p = 0; p < NUM_FRAMES + 2; p++) {
-        if (p == pagina_alvo) continue;
-        unsigned char *bp = fixa(p);
-        if (bp != NULL) {
-            solta(p, 0);
-        }
-    }
-
-    /* Mesmo que a pagina 2 tenha sido expulsa pelo LRU nesse meio tempo, a
-       politica STEAL garante que ela foi gravada em disco antes da expulsao */
-    unsigned char pagina_verificacao[TAMANHO_PAGINA];
-    ler_pagina(pagina_alvo, pagina_verificacao, sizeof(pagina_verificacao));
-    Registro verificado;
-    desserializa_registro(pagina_verificacao + offset_na_pagina, &verificado);
-    printf("[cache] apos possivel expulsao, disco contem id=%d, valor=%d (esperado id=99, valor=12345)\n",
-           verificado.id, verificado.valor);
-
-    /* descarrega() explicito: garante que qualquer pagina ainda suja no cache
-       seja persistida (uso tipico ao final do programa) */
-    for (int p = 0; p < total_paginas_alocadas(); p++) {
-        descarrega(p);
-    }
-
-    imprime_estatisticas_cache();
-
-    return 0;
 }
