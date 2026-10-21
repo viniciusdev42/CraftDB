@@ -400,8 +400,3 @@ void imprimir_arvore(void) {
     int raiz = le_raiz();
     if (raiz >= 0) imprimir_no(raiz, 0);
 }
-
-/* Os testes de aceitacao incluem este arquivo diretamente (#include "M3.c") para
-   ganhar acesso as funcoes/estruturas internas e fornecem seu proprio main(); por
-   isso o main() de demonstracao abaixo e' suprimido quando DB_CRAFT_TEST_MAIN
-   estiver definido antes do #include. */
