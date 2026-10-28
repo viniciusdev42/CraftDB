@@ -757,3 +757,243 @@ Para que seja um índice completo são necessárias as seguintes funcionalidades
 4. **Chaves duplicadas e compostas**
 5. **Atomicidade de divisões**
 
+# Módulo 4
+
+## Introdução
+
+O Módulo 4 se trata de um conjunto de arquivos responsáveis por receber comandos SQL e convertê-los em instruções para o CraftDB.
+
+Em bancos de dados relacionais,o processamento de uma consulta passa por diversas etapas até encontrar os dados no disco. Os componentes **Tokenizador,Parser e Catálogo** são responsáveis por atuar nesse pipeline.
+
+## Visão Geral
+
+### Tokenizador
+
+O Tokenizador é o componente que recebe um texto SQL e o converte em uma sequência de **tokens**. Ele ignora espaços em brancos,quebras de linhas e comentários,transformando um texto contínuo em uma sequência estruturada de palavra-chave,identificadores,operadores e literais.
+
+``` SQL
+CREATE TABLE alunos (id INT, nome CHAR);
+INSERT INTO alunos VALUES (1, 'Ana');
+SELECT * FROM alunos WHERE id >= 1 AND nome <> 'Bia';
+```
+
+Os tokens upper-case são palavras-chaves. Os tokens lower-case são identificadores. Os tokens `>`,`<` e  `=` são operadores. O token `1` é um literal numérico. O token `;` é um delimitador.
+
+Em `Tokenizer.c` os tokens estão em um `enum` chamado `TipoToken`,o qual lista todas as categorias de tokens.
+
+``` C
+typedef enum {
+    /* Palavras reservadas (comandos) */
+    TOKEN_CREATE,
+    TOKEN_TABLE,
+    TOKEN_INSERT,
+    TOKEN_INTO,
+    TOKEN_VALUES,
+    TOKEN_SELECT,
+    TOKEN_FROM,
+    TOKEN_WHERE,
+    TOKEN_AND,
+
+    /* Tipos de dados */
+    TOKEN_INT,
+    TOKEN_CHAR,
+
+    /* Literais e identificadores */
+    TOKEN_IDENTACAO,
+    TOKEN_NUMERO,
+    TOKEN_STRING,
+
+    /* Separadores e símbolos */
+    TOKEN_ESPACO,
+    TOKEN_ABRE_PARENTESE,
+    TOKEN_FECHA_PARENTESE,
+    TOKEN_VIRGULA,
+    TOKEN_PONTO_VIRGULA,
+    TOKEN_ASTERISCO,
+
+    /* Operadores de comparação (usados no WHERE) */
+    TOKEN_IGUAL,
+    TOKEN_DIFERENTE,
+    TOKEN_MENOR,
+    TOKEN_MENOR_IGUAL,
+    TOKEN_MAIOR,
+    TOKEN_MAIOR_IGUAL,
+
+    /* Controle */
+    TOKEN_NAO_SUPORTADO,   /* JOIN, ORDER, BY, GROUP, COUNT, OR, ...      */
+    TOKEN_FIM,             /* final de texto                              */
+    TOKEN_ERRO             /* caractere/lexema invalido                   */
+} TipoToken;
+```
+
+Cada token é representado por uma `struct`,que guarda tipo,lexema,linha e coluna.
+
+``` C
+typedef struct {
+    TipoToken tipo;
+    char      lexema[MAX_LEXEMA];
+    int       linha;
+    int       coluna;
+} Token;
+``` 
+
+O Tokenizador também é representado por uma `struct`,que guarda o texto de entrada e a posição atual.
+
+``` C
+typedef struct {
+    const char *src;     //  texto de entrada 
+    size_t      posicao;  //  posicao atual 
+    int         linha;
+    int         coluna;
+} Tokenizador;
+```
+
+Os tokens são devolvidos exatamente na ordem em que aparecem no texto,cada um com uma linha e coluna de origem. Isso é feito porque no SQL a ordem muda o significado. Um comando `INSERT INTO ... VALUES` não é o mesmo que `VALUES ... INSERT INTO`. Sendo assim,o tokenizador garante que a sequência de saída seja fiél a sequência de entrada,pois o Parser deve validá-la depois.
+
+Cada palavra reservada é representada por uma `struct`,que armazena a palavra e o tipo de token. As palavras reservadas são `CREATE,INSERT,INSERT,SELECT,FROM,WHERE,AND,INT e CHAR`.
+
+``` C
+typedef struct {
+    const char *palavra;
+    TipoToken   tipo;
+} Reservada;
+```
+
+``` C
+static const Reservada RESERVADAS[] = {
+    /* suportadas */
+    { "CREATE", TOKEN_CREATE }, { "TABLE",  TOKEN_TABLE  },
+    { "INSERT", TOKEN_INSERT }, { "INTO",   TOKEN_INTO   },
+    { "VALUES", TOKEN_VALUES }, { "SELECT", TOKEN_SELECT },
+    { "FROM",   TOKEN_FROM   }, { "WHERE",  TOKEN_WHERE  },
+    { "AND",    TOKEN_AND    },
+    { "INT",    TOKEN_INT    }, { "CHAR",   TOKEN_CHAR   },
+
+    /* fora do escopo: OR, juncao, ORDER BY, agregacao, GROUP BY */
+    { "OR",     TOKEN_NAO_SUPORTADO },
+    { "JOIN",   TOKEN_NAO_SUPORTADO }, { "INNER",  TOKEN_NAO_SUPORTADO },
+    { "LEFT",   TOKEN_NAO_SUPORTADO }, { "RIGHT",  TOKEN_NAO_SUPORTADO },
+    { "ON",     TOKEN_NAO_SUPORTADO },
+    { "ORDER",  TOKEN_NAO_SUPORTADO }, { "BY",     TOKEN_NAO_SUPORTADO },
+    { "GROUP",  TOKEN_NAO_SUPORTADO }, { "HAVING", TOKEN_NAO_SUPORTADO },
+    { "COUNT",  TOKEN_NAO_SUPORTADO }, { "SUM",    TOKEN_NAO_SUPORTADO },
+    { "AVG",    TOKEN_NAO_SUPORTADO }, { "MIN",    TOKEN_NAO_SUPORTADO },
+    { "MAX",    TOKEN_NAO_SUPORTADO },
+};
+```
+
+As palavras reservadas possuem prioridade sobre os identificadores. O código consulta primeiro a tabela `RESERVADAS` e caso a palavra não esteja lá,ela é classificada como um `TOKEN_NAO_SUPORTADO`.
+
+O Tokenizador é responsável por devolver o próximo token que aparece na ordem do texto. Isso é feito por meio da função `proximo_token()`.
+
+``` C
+Token proximo_token(Tokenizador *t)
+{
+    Token token;
+    size_t n = 0;
+    int caractere;
+
+    memset(&token, 0, sizeof token);
+    token.linha  = t->linha;
+    token.coluna = t->coluna;
+    caractere = olhar(t);
+
+    /* 1. Final de texto */
+    if (caractere == '\0') {
+        token.tipo = TOKEN_FIM;
+        return token;
+    }
+
+    /* 2. Espaco (espaco, tab, \n, \r) - uma sequencia vira um token */
+    if (isspace(caractere)) {
+        while (isspace(olhar(t)))
+            avancar(t);
+        token.tipo = TOKEN_ESPACO;
+        strcpy(token.lexema, " ");
+        return token;
+    }
+
+    /* 3. Simbolos de um caractere */
+    switch (caractere) {
+        case '(': token.tipo = TOKEN_ABRE_PARENTESE;   break;
+        case ')': token.tipo = TOKEN_FECHA_PARENTESE;  break;
+        case ',': token.tipo = TOKEN_VIRGULA;          break;
+        case ';': token.tipo = TOKEN_PONTO_VIRGULA;    break;
+        case '*': token.tipo = TOKEN_ASTERISCO;        break;
+        case '=': token.tipo = TOKEN_IGUAL;            break;
+        default:  break;
+    }
+    if (caractere == '(' || caractere == ')' || caractere == ',' || caractere == ';' ||
+        caractere == '*' || caractere == '=') {
+        adicionar_caractere(&token, &n, avancar(t));
+        return token;
+    }
+
+    /* 4. Operadores de 1 ou 2 caracteres: < <= <> > >= != */
+    if (caractere == '<' || caractere == '>' || caractere == '!') {
+        adicionar_caractere(&token, &n, avancar(t));
+        int proximo = olhar(t);
+
+        if (caractere == '<') {
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_MENOR_IGUAL; }
+            else if (proximo == '>') { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_DIFERENTE;   }
+            else                  { token.tipo = TOKEN_MENOR; }
+        } else if (caractere == '>') {
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_MAIOR_IGUAL; }
+            else                  { token.tipo = TOKEN_MAIOR; }
+        } else { /* '!' so e valido como "!=" */
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_DIFERENTE; }
+            else                  { token.tipo = TOKEN_ERRO; }
+        }
+        return token;
+    }
+
+    /* 5. Literal CHAR: 'texto' (no maximo TAM_REGISTRO caracteres) */
+    if (caractere == '\'') {
+        size_t tamanho = 0;
+        avancar(t);                          /* abre aspas */
+        while (olhar(t) != '\'' && olhar(t) != '\0') {
+            adicionar_caractere(&token, &n, avancar(t));
+            tamanho++;
+        }
+        if (olhar(t) != '\'') {              /* chegou ao fim sem fechar */
+            token.tipo = TOKEN_ERRO;
+            return token;
+        }
+        avancar(t);                          /* fecha aspas */
+        token.tipo = (tamanho > TAM_REGISTRO) ? TOKEN_ERRO : TOKEN_STRING;
+        return token;
+    }
+
+    /* 6. Literal INT: sequencia de digitos */
+    if (isdigit(caractere)) {
+        while (isdigit(olhar(t)))
+            adicionar_caractere(&token, &n, avancar(t));
+        /* numero colado em letra (ex.: 12abc) e invalido */
+        if (isalpha(olhar(t)) || olhar(t) == '_') {
+            while (isalnum(olhar(t)) || olhar(t) == '_')
+                adicionar_caractere(&token, &n, avancar(t));
+            token.tipo = TOKEN_ERRO;
+        } else {
+            token.tipo = TOKEN_NUMERO;
+        }
+        return token;
+    }
+
+    /* 7. Identificador ou palavra reservada */
+    if (isalpha(caractere) || caractere == '_') {
+        int estourou = 0;
+        while (isalnum(olhar(t)) || olhar(t) == '_') {
+            if (n >= MAX_LEXEMA - 1) estourou = 1;
+            adicionar_caractere(&token, &n, avancar(t));
+        }
+        token.tipo = estourou ? TOKEN_ERRO : classificar_palavra(token.lexema);
+        return token;
+    }
+
+    /* 8. Qualquer outro caractere e invalido */
+    adicionar_caractere(&token, &n, avancar(t));
+    token.tipo = TOKEN_ERRO;
+    return token;
+}
+```
