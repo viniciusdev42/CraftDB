@@ -997,3 +997,56 @@ Token proximo_token(Tokenizador *t)
     return token;
 }
 ```
+
+### Parser
+
+O Parser recebe a sequência de tokens gerada pelo Tokenizador e verifica se a estrutura da consulta faz sentido de acordo com as regras da linguagem SQL.
+
+Ele valida a gramática por meio da **Análise Sintática**. Se você escrever um comando errado,como `FROM usuarios SELECT nome`,o Parser verifica a ordem dos tokens e invalida a consulta imediatamente por ela violar as regras de sintaxe do SQL.
+
+Caso a sintaxe esteja correta,o Parser constrói uma árvore hierárquica chamada **Árvore Sintática Abstrata**,a qual representa a lógica da operação de forma estruturada para o banco de dados.
+
+``` C
+/*
+  --------------------------------
+   Arvore Sintatica Abstrata (AST)
+  --------------------------------
+*/
+
+typedef enum {
+    CMD_CREATE,
+    CMD_INSERT,
+    CMD_SELECT
+} TipoComando;
+
+typedef struct {Update NOTES.md
+    char      nome[MAX_LEXEMA];
+    TipoToken tipo;                 /* TOKEN_INT ou TOKEN_CHAR              */
+} Coluna;
+
+typedef struct {
+    TipoToken tipo;                 /* TOKEN_NUMERO ou TOKEN_STRING            */
+    int       numero;                  /* valido se tipo == TOKEN_NUMERO        */
+    char      str[MAX_LEXEMA];      /* valido se tipo == TOKEN_STRING     */
+} Valor;
+
+typedef struct {
+    char      coluna[MAX_LEXEMA];
+    TipoToken operacao;                   /* TOKEN_IGUAL, TOKEN_MENOR, ...        */
+    Valor     valor;
+} Condicao;
+
+typedef struct {
+    TipoComando tipo;
+    char        tabela[MAX_LEXEMA];
+
+    Coluna      colunas[MAX_COLUNAS];       /* CREATE TABLE             */
+    int         numero_colunas;
+
+    Valor       valores[MAX_VALORES];       /* INSERT                   */
+    int         numero_valores;
+
+    Condicao    condicoes[MAX_CONDICOES];   /* SELECT ... WHERE         */
+    int         numero_condicoes;
+} Comando;
+```
