@@ -1050,3 +1050,39 @@ typedef struct {
     int         numero_condicoes;
 } Comando;
 ```
+
+### Catálogo
+
+O Catálogo ou Dicionário de Dados é o repositório interno do banco de dados. Ele armazena os metadados do CraftDB,como tabelas,colunas,tipos de dados,tamanho e  posição (offset) de cada coluna dentro dos registros.
+
+``` C
+typedef struct {
+    char      nome[MAX_LEXEMA];
+    TipoToken tipo;                 /* TOKEN_INT ou TOKEN_CHAR              */
+    int       tamanho;              /* bytes ocupados no registro           */
+    int       deslocamento;         /* posicao da coluna dentro do registro */
+} ColunaCat;
+
+typedef struct {
+    char      nome[MAX_LEXEMA];
+    char      arquivo[TAM_ARQUIVO]; /* arquivo de dados da tabela (nome.dat)*/
+    ColunaCat colunas[MAX_COLUNAS];
+    int       numero_colunas;
+    int       tamanho_util;         /* soma dos tamanhos das colunas        */
+    int       tamanho_registro;     /* sempre TAM_REGISTRO                  */
+} TabelaCat;
+
+typedef struct {
+    TabelaCat tabelas[MAX_TABELAS];
+    int       numero_tabelas;
+    char      mensagem[MAX_MESSAGEM];   /* ultimo erro semantico            */
+} Catalogo;
+```
+
+| Comando | Ação do catálogo |
+|---|---|
+| `CREATE TABLE` | Registra a tabela, calcula o layout do registro e grava em disco |
+| `INSERT` | Confere tabela, quantidade de valores e tipo de cada valor |
+| `SELECT` | Confere tabela, colunas do `WHERE` e tipo dos literais |
+
+O Catálogo é uma camada separada do Parser. A validação semântica é responsabilidade do catálogo,enquanto que a análise sintática é responsabilidade do parser. Dessa forma,o catálogo recebe ASTs corretas.
