@@ -32,6 +32,35 @@ Na Árvore B+ o número de chaves por nó é 3. Escolheu-se esse valor para fins
 
 #### Módulo 4 - Parser & Catálogo
 
+Trata-se de um conjunto de estruturas usadas para processar **comandos SQL**. Esse módulo é composto por `Tokenizer,Parser e Catalog`.
+
+##### Tokenizer
+
+O `Tokenizer` é o componente que lê o texto bruto caractere por caractere e o transforma em uma sequência de **tokens**. Ele ignora espaços em brancos (excessivos),quebras de linha e comentários,agrupando caracteres válidos de acordo com as **regras léxicas** do SQL. Se o `Tokenizer` encontrar um caractere inválido (que não pertence ao vocabulário do SQL),ele interrompe o processo de tokenização imediatamente e retorna um erro léxico.
+
+---
+
+##### Parser
+
+O `Parser` é o componente que recebe a sequência linear de tokens geradas pelo `Tokenizer` e a analisa com base nas **regras gramaticais** do SQL. A sua função é garantir que a estrutura do comando siga as regras gramaticais e montar uma representação hierárquica chamada de **Árvore de Sintaxe Abstrata (AST)**.
+
+Em uma AST,uma query pode ser representada da seguinte forma:
+
+* **Nó Raiz:** `SELECT`
+* **Projeção (Colunas):** `[id, nome]`
+* **Origem (Tabela):** `[usuarios]`
+* **Filtro (Condição):** Operador `>`
+* **Operando Esquerdo:** Coluna `idade`
+* **Operando Direito:** Literal `18`
+
+Se você digitar algo estruturalmente incorreto, como `SELECT FROM usuarios WHERE;`, o parser identificará que a cláusula `SELECT` veio sem colunas ou que o operador `WHERE` está incompleto. Ele rejeita a consulta e gera um **erro de sintaxe**, indicando inclusive a linha ou posição aproximada do erro.
+
+----
+
+##### Catalog
+
+O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colunas cada tabela possuí,o tipo de dado,o tamanho em bytes e a posição de cada coluna de acordo com o registro (página). Ele é a **ponte** entre o `Parser` e o `Executor`.
+
 #### Módulo 5 - Executor
 
 #### Módulo 6 - Transações
