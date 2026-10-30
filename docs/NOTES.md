@@ -246,19 +246,19 @@ O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página
 
 ## Suíte de Testes
 
-Encontra-se no diretório `Test/M1`.
+Encontra-se no diretório `test/Pager`.
 
-Nela,temos um arquivo `M1.c` independente que está ligado à biblioteca `Header.h`,sendo usado por `Main.c`. Esses arquivos estão separados devido a tanto `Test.c` quanto `Main.c` possuirem seu próprio bloco `main`,impossibilitando uma compilação direta.
+Nela,temos um arquivo `Pager.c` independente que está ligado à biblioteca `PagerHeader.h`,sendo usado por `PagerMain.c`. Esses arquivos estão separados devido a tanto `PagerTest.c` quanto `PagerMain.c` possuirem seu próprio bloco `main`,impossibilitando uma compilação direta.
 
 Para compilar e executar os arquivos,rode os seguintes comandos:
 
 ``` shell
-gcc M1.c Main.c -o Main # Linka o Main.c com o M1.c e compila 
+gcc Pager.c PagerMain.c -o Main # Linka o PagerMain.c com o Pager.c e compila 
 ```
 
 
 ``` shell
-gcc M1.c Test.c -o Test # Linka o Test.c com o M1.c,compila e executa o main do Test.c
+gcc Pager.c PagerTest.c -o PagerTest # Linka o PagerTest.c com o Pager.c,compila e executa o main do PagerTest.c
 ```
 
 Cada funcionalidade ganhou uma função de teste dedicada (alocação, validação, leitura/escrita, isolamento, serialização, sincronização, persistência), usando uma pequena infraestrutura própria (`verifica`/`VERIFICA`) que registra sucesso ou falha sem interromper a execução dos demais testes.
@@ -301,7 +301,7 @@ O Módulo 2 adota três políticas:
 
 Isso permite que o Módulo controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
 
-O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `M2.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
+O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `Cache.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
 
 ### Frames
 
@@ -499,15 +499,15 @@ Uma página fixada não pode ser processada por essa função devido ao bloco `i
 
 ## Suíte de Testes
 
-Localiza-se no diretório `M2` de `Test`.Nela,temos três arquivos C:`T1.c,T2.c,T3.c`.
+Localiza-se no diretório `Cache` de `tests`.Nela,temos três arquivos C:`CacheTest1.c,CacheTest2.c,CacheTest3.c`.
 
-O `T1.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
+O `CacheTest1.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
 
-O `T2.c` testa o cache com a capacidade reduzida de 3 frames.Ele verifica se ao tocar 4 páginas distintas com um cache de apenas 3 frames,a página que for expulsa será exatamente a usada menos recentemente (LRU),em vez da primeira que entrou (FIFO).
+O `CacheTest2.c` testa o cache com a capacidade reduzida de 3 frames.Ele verifica se ao tocar 4 páginas distintas com um cache de apenas 3 frames,a página que for expulsa será exatamente a usada menos recentemente (LRU),em vez da primeira que entrou (FIFO).
 
-O `T3.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
+O `CacheTest3.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
 
-O `Test.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux. Ele compila e executa a suíte dos testes de aceitação do M2. Para executá-lo rode o seguinte comando: ` bash Test.sh`.
+O `CacheTest.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux. Ele compila e executa a suíte dos testes de aceitação do módulo de Cache. Para executá-lo rode o seguinte comando: ` bash CacheTest.sh`.
 
 ## Conclusões
 
