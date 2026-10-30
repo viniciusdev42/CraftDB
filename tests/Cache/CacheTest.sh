@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compila e executa a suite de testes de aceitacao do cache de paginas (M2.c).
+# Compila e executa a suite de testes de aceitacao do cache de paginas (Cache.c.c).
 # Uso: ./executa_testes.sh
 # Saida: 0 se todos os testes passarem; 1 se algum falhar.
 
@@ -8,30 +8,30 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
 echo "Compilando os testes de aceitacao..."
-gcc -std=c11 -Wall -Wextra -o T1 T1.c || exit 2
-gcc -std=c11 -Wall -Wextra -o T2 T2.c|| exit 2
-gcc -std=c11 -Wall -Wextra -o T3 T3.c || exit 2
+gcc -std=c11 -Wall -Wextra -o CacheTest1 CacheTest1.c || exit 2
+gcc -std=c11 -Wall -Wextra -o CacheTest2 CacheTest2.c|| exit 2
+gcc -std=c11 -Wall -Wextra -o CacheTest3 CacheTest3.c || exit 2
 
 FALHAS=0
 
 echo
 echo ">>> Teste 1: 4 frames - multiplas leituras da mesma pagina = uma unica leitura de disco"
 rm -f craft-db.dat
-./T1
+./CacheTest1
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo
 echo ">>> Teste 2: 3 frames - ao tocar 4 paginas, a menos usada e expulsa (LRU)"
 rm -f craft-db.dat
-./T2
+./CacheTest2
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo
 echo ">>> Teste 3: alterar + expulsar + reabrir em outro processo => alteracao persiste"
 rm -f craft-db.dat
-./T3 escritor
+./CacheTest3 escritor
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
-./T3 leitor
+./CacheTest3 leitor
 if [ $? -ne 0 ]; then FALHAS=$((FALHAS + 1)); fi
 
 echo

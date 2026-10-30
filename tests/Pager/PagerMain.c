@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "Header.h"
+#include "PageHeader.h"
 
 int main(void) {
     int pagina_alvo = 2;

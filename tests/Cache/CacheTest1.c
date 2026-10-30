@@ -1,7 +1,7 @@
 /*
  * Teste de Aceitacao 1
  * ---------------------
- * Cenario: cache com 4 frames (capacidade padrao de M2.c).
+ * Cenario: cache com 4 frames (capacidade padrao de Cache.c).
  *
  * Verifica que MULTIPLAS leituras (fixa) da MESMA pagina resultam em uma
  * UNICA leitura fisica em disco: a primeira fixa() deve ser falta (miss) e
@@ -9,11 +9,11 @@
  * mesma pagina devem ser acertos (hits), sem tocar o disco novamente, e
  * devem devolver sempre a MESMA referencia de buffer.
  *
- * Este teste inclui M2.c diretamente (em vez de linkar como biblioteca)
+ * Este teste inclui Cache.c diretamente (em vez de linkar como biblioteca)
  * para ter acesso a estrutura interna 'cache' e a 'busca_frame()', o que
  * permite verificacoes mais rigorosas do que apenas observar o retorno
  * de fixa(). CRAFT_DB_TESTE_SEM_MAIN suprime o main() de demonstracao
- * de M2.c para que este arquivo possa definir o seu proprio.
+ * de Cache.c para que este arquivo possa definir o seu proprio.
  *
  * Compilar:  gcc -std=c11 -Wall -Wextra -o teste1 teste1_leitura_unica.c
  * Executar:  ./teste1
@@ -21,7 +21,7 @@
  */
 
 #define CRAFT_DB_TESTE_SEM_MAIN
-#include "M2.c"
+#include "Cache.c"
 
 static int testes_totais = 0;
 static int testes_ok = 0;

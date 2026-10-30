@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "Header.h"
+#include "PagerHeader.h"
 
 static int testes_executados = 0;
 static int testes_ok = 0;

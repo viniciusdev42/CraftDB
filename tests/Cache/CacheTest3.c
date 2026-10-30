@@ -26,7 +26,7 @@
 
 #define NUM_FRAMES 1
 #define CRAFT_DB_TESTE_SEM_MAIN
-#include "M2.c"
+#include "Cache.c"
 
 #define PAGINA_TESTE   0
 #define SLOT_TESTE     0

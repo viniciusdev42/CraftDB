@@ -2,7 +2,7 @@
  * Teste de Aceitacao 2
  * ---------------------
  * Cenario: cache com 3 frames (capacidade reduzida via -DNUM_FRAMES=3
- * ou, como aqui, via #define ANTES do #include "M2.c").
+ * ou, como aqui, via #define ANTES do #include "Cache.c").
  *
  * Verifica que, ao tocar 4 paginas distintas com um cache de apenas
  * 3 frames, a pagina expulsa e' exatamente a MENOS RECENTEMENTE USADA
@@ -27,7 +27,7 @@
 
 #define NUM_FRAMES 3
 #define CRAFT_DB_TESTE_SEM_MAIN
-#include "M2.c"
+#include "Cache.c"
 
 static int testes_totais = 0;
 static int testes_ok = 0;
