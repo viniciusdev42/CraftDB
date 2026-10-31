@@ -4,6 +4,10 @@
 #include <string.h>
 #include <unistd.h> // fsync - Gravação em Disco 
 #include<fcntl.h> // struct flock - Isolamento de Páginas
+#include <ctype.h> // Tokenizador
+#include <errno.h>
+#include <limits.h>
+#include <stdarg.h>
 
 #define TAMANHO_PAGINA 4096   // 4KB
 #define TAMANHO_CABECALHO 16  // 16B   
@@ -878,7 +882,778 @@ void imprimir_arvore(void) {
     if (raiz >= 0) imprimir_no(raiz, 0);
 }
 
-#ifndef DB_CRAFT_TEST_MAIN
+
+/*
+ * Tokenizer (Analisador Lexico).
+ *
+ * Comandos reconhecidos:
+ *   CREATE TABLE nome (coluna INT, coluna CHAR, ...);
+ *   INSERT INTO nome VALUES (10, 'abc');
+ *   SELECT * FROM nome WHERE coluna = 10 AND outra <> 'x';
+ *
+ * Tipos de dados: INT e CHAR (registros de tamanho fixo de 8 bytes).
+ * NAO ha: juncao, ORDER BY, agregacao, subconsulta, OR.
+ * Palavras dessas construcoes devolvem TOKEN_NAO_SUPORTADO.
+ */
+
+#define TAMANHO_LEXEMA   64  
+
+/* ------------------------------------------------------------------ */
+/* Tipos de token                                                      */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    /* Palavras reservadas (comandos) */
+    TOKEN_CREATE,
+    TOKEN_TABLE,
+    TOKEN_INSERT,
+    TOKEN_INTO,
+    TOKEN_VALUES,
+    TOKEN_SELECT,
+    TOKEN_FROM,
+    TOKEN_WHERE,
+    TOKEN_AND,
+
+    /* Tipos de dados */
+    TOKEN_INT,
+    TOKEN_CHAR,
+
+    /* Literais e identificadores */
+    TOKEN_IDENTACAO,
+    TOKEN_NUMERO,
+    TOKEN_STRING,
+
+    /* Separadores e símbolos */
+    TOKEN_ESPACO,
+    TOKEN_ABRE_PARENTESE,
+    TOKEN_FECHA_PARENTESE,
+    TOKEN_VIRGULA,
+    TOKEN_PONTO_VIRGULA,
+    TOKEN_ASTERISCO,
+
+    /* Operadores de comparação (usados no WHERE) */
+    TOKEN_IGUAL,
+    TOKEN_DIFERENTE,
+    TOKEN_MENOR,
+    TOKEN_MENOR_IGUAL,
+    TOKEN_MAIOR,
+    TOKEN_MAIOR_IGUAL,
+
+    /* Controle */
+    TOKEN_NAO_SUPORTADO,   /* JOIN, ORDER, BY, GROUP, COUNT, OR, ...      */
+    TOKEN_FIM,             /* final de texto                              */
+    TOKEN_ERRO             /* caractere/lexema invalido                   */
+} TipoToken;
+
+static const char *nome_token(TipoToken token)
+{
+    switch (token) {
+        case TOKEN_CREATE:          return "CREATE";
+        case TOKEN_TABLE:           return "TABLE";
+        case TOKEN_INSERT:          return "INSERT";
+        case TOKEN_INTO:            return "INTO";
+        case TOKEN_VALUES:          return "VALUES";
+        case TOKEN_SELECT:          return "SELECT";
+        case TOKEN_FROM:            return "FROM";
+        case TOKEN_WHERE:           return "WHERE";
+        case TOKEN_AND:             return "AND";
+        case TOKEN_INT:             return "INT";
+        case TOKEN_CHAR:            return "CHAR";
+        case TOKEN_IDENTACAO:       return "IDENT";
+        case TOKEN_NUMERO:          return "NUMERO";
+        case TOKEN_STRING:          return "STRING";
+        case TOKEN_ESPACO:          return "ESPACO";
+        case TOKEN_ABRE_PARENTESE:  return "ABRE_PAR";
+        case TOKEN_FECHA_PARENTESE: return "FECHA_PAR";
+        case TOKEN_VIRGULA:         return "VIRGULA";
+        case TOKEN_PONTO_VIRGULA:   return "PONTO_VIRGULA";
+        case TOKEN_ASTERISCO:       return "ASTERISCO";
+        case TOKEN_IGUAL:           return "IGUAL";
+        case TOKEN_DIFERENTE:       return "DIFERENTE";
+        case TOKEN_MENOR:           return "MENOR";
+        case TOKEN_MENOR_IGUAL:     return "MENOR_IGUAL";
+        case TOKEN_MAIOR:           return "MAIOR";
+        case TOKEN_MAIOR_IGUAL:     return "MAIOR_IGUAL";
+        case TOKEN_NAO_SUPORTADO:   return "NAO_SUPORTADO";
+        case TOKEN_FIM:             return "FIM";
+        case TOKEN_ERRO:            return "ERRO";
+    }
+    return "?";
+}
+
+/* ------------------------------------------------------------------ */
+/* Estruturas                                                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    TipoToken tipo;
+    char      lexema[TAMANHO_LEXEMA];
+    int       linha;
+    int       coluna;
+} Token;
+
+typedef struct {
+    const char *src;     /* texto de entrada                            */
+    size_t      posicao;     /* posicao atual                               */
+    int         linha;
+    int         coluna;
+} Tokenizador;
+
+/* ------------------------------------------------------------------ */
+/* Tabela de palavras reservadas                                       */
+/* A busca e sequencial e tem prioridade sobre TOKEN_IDENTACAO: se a palavra */
+/* estiver aqui, nunca vira identificador.                             */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    const char *palavra;
+    TipoToken   tipo;
+} Reservada;
+
+static const Reservada RESERVADAS[] = {
+    /* suportadas */
+    { "CREATE", TOKEN_CREATE }, { "TABLE",  TOKEN_TABLE  },
+    { "INSERT", TOKEN_INSERT }, { "INTO",   TOKEN_INTO   },
+    { "VALUES", TOKEN_VALUES }, { "SELECT", TOKEN_SELECT },
+    { "FROM",   TOKEN_FROM   }, { "WHERE",  TOKEN_WHERE  },
+    { "AND",    TOKEN_AND    },
+    { "INT",    TOKEN_INT    }, { "CHAR",   TOKEN_CHAR   },
+
+    /* fora do escopo: OR, juncao, ORDER BY, agregacao, GROUP BY */
+    { "OR",     TOKEN_NAO_SUPORTADO },
+    { "JOIN",   TOKEN_NAO_SUPORTADO }, { "INNER",  TOKEN_NAO_SUPORTADO },
+    { "LEFT",   TOKEN_NAO_SUPORTADO }, { "RIGHT",  TOKEN_NAO_SUPORTADO },
+    { "ON",     TOKEN_NAO_SUPORTADO },
+    { "ORDER",  TOKEN_NAO_SUPORTADO }, { "BY",     TOKEN_NAO_SUPORTADO },
+    { "GROUP",  TOKEN_NAO_SUPORTADO }, { "HAVING", TOKEN_NAO_SUPORTADO },
+    { "COUNT",  TOKEN_NAO_SUPORTADO }, { "SUM",    TOKEN_NAO_SUPORTADO },
+    { "AVG",    TOKEN_NAO_SUPORTADO }, { "MIN",    TOKEN_NAO_SUPORTADO },
+    { "MAX",    TOKEN_NAO_SUPORTADO },
+};
+
+#define NUM_RESERVADAS (sizeof(RESERVADAS) / sizeof(RESERVADAS[0]))
+
+/* Comparacao sem diferenciar maiusculas/minusculas */
+static int contexto_igual(const char *a, const char *b)
+{
+    while (*a && *b) {
+        if (toupper((unsigned char)*a) != toupper((unsigned char)*b))
+            return 0;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static TipoToken classificar_palavra(const char *lexer)
+{
+    for (size_t i = 0; i < NUM_RESERVADAS; i++)
+        if (contexto_igual(lexer, RESERVADAS[i].palavra))
+            return RESERVADAS[i].tipo;
+    return TOKEN_IDENTACAO;
+}
+
+/* ------------------------------------------------------------------ */
+/* Funcoes auxiliares                                                  */
+/* ------------------------------------------------------------------ */
+
+void iniciar_tokenizador(Tokenizador *token, const char *texto)
+{
+    token->src    = texto;
+    token->posicao    = 0;
+    token->linha  = 1;
+    token->coluna = 1;
+}
+
+static int olhar(const Tokenizador *t)
+{
+    return (unsigned char)t->src[t->posicao];
+}
+
+static int avancar(Tokenizador *t)
+{
+    int caractere = olhar(t);
+    if (caractere == '\0')
+        return '\0';
+    t->posicao++;
+    if (caractere == '\n') { t->linha++; t->coluna = 1; }
+    else {t->coluna++; }
+    return caractere;
+}
+
+static void adicionar_caractere(Token *token, size_t *n, int caractere)
+{
+    if (*n <TAMANHO_LEXEMA - 1)
+        token->lexema[(*n)++] = (char)caractere;
+    token->lexema[*n] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+/* Funcao principal: devolve o proximo token, na ordem do texto        */
+/* ------------------------------------------------------------------ */
+
+Token proximo_token(Tokenizador *t)
+{
+    Token token;
+    size_t n = 0;
+    int caractere;
+
+    memset(&token, 0, sizeof token);
+    token.linha  = t->linha;
+    token.coluna = t->coluna;
+    caractere = olhar(t);
+
+    /* 1. Final de texto */
+    if (caractere == '\0') {
+        token.tipo = TOKEN_FIM;
+        return token;
+    }
+
+    /* 2. Espaco (espaco, tab, \n, \r) - uma sequencia vira um token */
+    if (isspace(caractere)) {
+        while (isspace(olhar(t)))
+            avancar(t);
+        token.tipo = TOKEN_ESPACO;
+        strcpy(token.lexema, " ");
+        return token;
+    }
+
+    /* 3. Simbolos de um caractere */
+    switch (caractere) {
+        case '(': token.tipo = TOKEN_ABRE_PARENTESE;   break;
+        case ')': token.tipo = TOKEN_FECHA_PARENTESE;  break;
+        case ',': token.tipo = TOKEN_VIRGULA;          break;
+        case ';': token.tipo = TOKEN_PONTO_VIRGULA;    break;
+        case '*': token.tipo = TOKEN_ASTERISCO;        break;
+        case '=': token.tipo = TOKEN_IGUAL;            break;
+        default:  break;
+    }
+    if (caractere == '(' || caractere == ')' || caractere == ',' || caractere == ';' ||
+        caractere == '*' || caractere == '=') {
+        adicionar_caractere(&token, &n, avancar(t));
+        return token;
+    }
+
+    /* 4. Operadores de 1 ou 2 caracteres: < <= <> > >= != */
+    if (caractere == '<' || caractere == '>' || caractere == '!') {
+        adicionar_caractere(&token, &n, avancar(t));
+        int proximo = olhar(t);
+
+        if (caractere == '<') {
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_MENOR_IGUAL; }
+            else if (proximo == '>') { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_DIFERENTE;   }
+            else                  { token.tipo = TOKEN_MENOR; }
+        } else if (caractere == '>') {
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_MAIOR_IGUAL; }
+            else                  { token.tipo = TOKEN_MAIOR; }
+        } else { /* '!' so e valido como "!=" */
+            if (proximo == '=')      { adicionar_caractere(&token, &n, avancar(t)); token.tipo = TOKEN_DIFERENTE; }
+            else                  { token.tipo = TOKEN_ERRO; }
+        }
+        return token;
+    }
+
+    /* 5. Literal CHAR: 'texto' (no maximo TAMANHO_REGISTRO caracteres) */
+    if (caractere == '\'') {
+        size_t tamanho = 0;
+        avancar(t);                          /* abre aspas */
+        while (olhar(t) != '\'' && olhar(t) != '\0') {
+            adicionar_caractere(&token, &n, avancar(t));
+            tamanho++;
+        }
+        if (olhar(t) != '\'') {              /* chegou ao fim sem fechar */
+            token.tipo = TOKEN_ERRO;
+            return token;
+        }
+        avancar(t);                          /* fecha aspas */
+        token.tipo = (tamanho > TAMANHO_REGISTRO) ? TOKEN_ERRO : TOKEN_STRING;
+        return token;
+    }
+
+    /* 6. Literal INT: sequencia de digitos */
+    if (isdigit(caractere)) {
+        while (isdigit(olhar(t)))
+            adicionar_caractere(&token, &n, avancar(t));
+        /* numero colado em letra (ex.: 12abc) e invalido */
+        if (isalpha(olhar(t)) || olhar(t) == '_') {
+            while (isalnum(olhar(t)) || olhar(t) == '_')
+                adicionar_caractere(&token, &n, avancar(t));
+            token.tipo = TOKEN_ERRO;
+        } else {
+            token.tipo = TOKEN_NUMERO;
+        }
+        return token;
+    }
+
+    /* 7. Identificador ou palavra reservada */
+    if (isalpha(caractere) || caractere == '_') {
+        int estourou = 0;
+        while (isalnum(olhar(t)) || olhar(t) == '_') {
+            if (n >=TAMANHO_LEXEMA - 1) estourou = 1;
+            adicionar_caractere(&token, &n, avancar(t));
+        }
+        token.tipo = estourou ? TOKEN_ERRO : classificar_palavra(token.lexema);
+        return token;
+    }
+
+    /* 8. Qualquer outro caractere e invalido */
+    adicionar_caractere(&token, &n, avancar(t));
+    token.tipo = TOKEN_ERRO;
+    return token;
+}
+
+static char *ler_arquivo(const char *caminho)
+{
+    FILE *f = fopen(caminho, "rb");
+    if (!f) return NULL;
+
+    size_t capacidade = 1024, tamanho = 0;
+    char *buffer = malloc(capacidade);
+    if (!buffer) { fclose(f); return NULL; }
+
+    size_t lidos;
+    while ((lidos = fread(buffer + tamanho, 1, capacidade - tamanho - 1, f)) > 0) {
+        tamanho += lidos;
+        if (tamanho + 1 >= capacidade) {
+            capacidade *= 2;
+            char *novo = realloc(buffer, capacidade);
+            if (!novo) { free(buffer); fclose(f); return NULL; }
+            buffer = novo;
+        }
+    }
+    buffer[tamanho] = '\0';
+    fclose(f);
+    return buffer;
+}
+
+/*
+ * Parser (Analisador Sintatico) .
+ *
+ * Usa o Analisador Lexico do Tokenizer.
+
+ * Gramatica (palavras reservadas sem diferenciar maiusculas/minusculas):
+ *
+ *   programa   ::= { comando }  FINAL
+ *   comando    ::= create | insert | select
+ *
+ *   create     ::= CREATE TABLE IDENT '(' coluna { ',' coluna } ')' ';'
+ *   coluna     ::= IDENT ( INT | CHAR )
+ *
+ *   insert     ::= INSERT INTO IDENT VALUES '(' valor { ',' valor } ')' ';'
+ *
+ *   select     ::= SELECT '*' FROM IDENT [ WHERE condicao { AND condicao } ] ';'
+ *   condicao   ::= IDENT operador valor
+ *   operador   ::= '=' | '<>' | '!=' | '<' | '<=' | '>' | '>='
+ *
+ *   valor      ::= NUMERO | STRING
+ *
+ */
+ 
+/* ------------------------------------------------------------------ */
+/* Limites                                                             */
+/* ------------------------------------------------------------------ */
+
+#define MAX_COLUNAS   16   /* colunas por tabela                        */
+#define MAX_VALORES   16   /* valores por INSERT                        */
+#define MAX_CONDICOES 16   /* condicoes por WHERE                       */
+#define MAX_MESSAGEM  256  /* tamanho das mensagens de erro             */
+
+/* ------------------------------------------------------------------ */
+/* Arvore sintatica (AST)                                              */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    CMD_CREATE,
+    CMD_INSERT,
+    CMD_SELECT
+} TipoComando;
+
+typedef struct {
+    char      nome[TAMANHO_LEXEMA];
+    TipoToken tipo;                 /* TOKEN_INT ou TOKEN_CHAR              */
+} Coluna;
+
+typedef struct {
+    TipoToken tipo;                 /* TOKEN_NUMERO ou TOKEN_STRING            */
+    int       numero;                  /* valido se tipo == TOKEN_NUMERO        */
+    char      str[TAMANHO_LEXEMA];      /* valido se tipo == TOKEN_STRING     */
+} Valor;
+
+typedef struct {
+    char      coluna[TAMANHO_LEXEMA];
+    TipoToken operacao;                   /* TOKEN_IGUAL, TOKEN_MENOR, ...        */
+    Valor     valor;
+} Condicao;
+
+typedef struct {
+    TipoComando tipo;
+    char        tabela[TAMANHO_LEXEMA];
+
+    Coluna      colunas[MAX_COLUNAS];       /* CREATE TABLE             */
+    int         numero_colunas;
+
+    Valor       valores[MAX_VALORES];       /* INSERT                   */
+    int         numero_valores;
+
+    Condicao    condicoes[MAX_CONDICOES];   /* SELECT ... WHERE         */
+    int         numero_condicoes;
+} Comando;
+
+/* ------------------------------------------------------------------ */
+/* Estado do parser                                                    */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    Tokenizador lexer;
+    Token       atual;              /* token corrente (lookahead)       */
+    char        mensagem[MAX_MESSAGEM];       /* ultima mensagem de erro          */
+} Parser;
+
+/* Avanca para o proximo token ignorando espacos em branco */
+static void avancar_parser(Parser *parser)
+{
+    do {
+        parser->atual = proximo_token(&parser->lexer);
+    } while (parser->atual.tipo == TOKEN_ESPACO);
+}
+
+static void iniciar_parser(Parser *parser, const char *texto)
+{
+    iniciar_tokenizador(&parser->lexer, texto);
+    parser->mensagem[0] = '\0';
+    avancar_parser(parser);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tratamento de erros                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Grava em parser->mensagem: "Linha L, coluna C: <mensagem>". Devolve sempre 0. */
+static int erro_formato(Parser *parser, const Token *token, const char *formato, ...)
+{
+    int numero_linha_coluna = snprintf(parser->mensagem, MAX_MESSAGEM, "Linha %d, coluna %d: ",
+                     token->linha, token->coluna);
+    if (numero_linha_coluna < 0 || numero_linha_coluna >= MAX_MESSAGEM)
+        return 0;
+
+    va_list ap;
+    va_start(ap, formato);
+    vsnprintf(parser->mensagem + numero_linha_coluna, MAX_MESSAGEM - (size_t)numero_linha_coluna, formato, ap);
+    va_end(ap);
+    return 0;
+}
+
+/* Erro "token inesperado": descreve o que foi encontrado e o que se esperava */
+static int falha(Parser *parser, const char *esperado)
+{
+    const Token *token = &parser->atual;
+
+    switch (token->tipo) {
+        case TOKEN_ERRO:
+            return erro_formato(parser, token, "token invalido '%s'", token->lexema);
+        case TOKEN_NAO_SUPORTADO:
+            return erro_formato(parser, token, "construcao nao suportada '%s'", token->lexema);
+        case TOKEN_FIM:
+            return erro_formato(parser, token, "fim inesperado do texto (esperado: %s)",
+                            esperado);
+        default:
+            return erro_formato(parser, token, "encontrado '%s' (esperado: %s)",
+                            token->lexema, esperado);
+    }
+}
+
+/* Consome o token se for do tipo esperado; caso contrario, gera erro */
+static int consumir_token(Parser *parser, TipoToken tipo, const char *descricao,
+                    Token *saida)
+{
+    if (parser->atual.tipo != tipo)
+        return falha(parser, descricao);
+    if (saida)
+        *saida = parser->atual;
+    avancar_parser(parser);
+    return 1;
+}
+
+/* Recuperacao de erro: descarta tokens ate depois do proximo ';' */
+static void sincronizar(Parser *parser)
+{
+    while (parser->atual.tipo != TOKEN_FIM && parser->atual.tipo != TOKEN_PONTO_VIRGULA)
+        avancar_parser(parser);
+    if (parser->atual.tipo == TOKEN_PONTO_VIRGULA)
+        avancar_parser(parser);
+}
+
+/* ------------------------------------------------------------------ */
+/* Regras gramaticais                                                */
+/* ------------------------------------------------------------------ */
+
+static int e_operador(TipoToken t)
+{
+    switch (t) {
+        case TOKEN_IGUAL:
+        case TOKEN_DIFERENTE:
+        case TOKEN_MENOR:
+        case TOKEN_MENOR_IGUAL:
+        case TOKEN_MAIOR:
+        case TOKEN_MAIOR_IGUAL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* valor ::= NUMERO | STRING */
+static int parse_valor(Parser *parser, Valor *valor)
+{
+    Token token = parser->atual;
+
+    if (token.tipo == TOKEN_NUMERO) {
+        char *fim;
+        errno = 0;
+        long x = strtol(token.lexema, &fim, 10);
+        if (errno == ERANGE || x > INT_MAX)
+            return erro_formato(parser, &token, "numero '%s' fora do intervalo de INT",
+                            token.lexema);
+        valor->tipo   = TOKEN_NUMERO;
+        valor->numero    = (int)x;
+        valor->str[0] = '\0';
+    } else if (token.tipo == TOKEN_STRING) {
+        valor->tipo = TOKEN_STRING;
+        valor->numero  = 0;
+        strcpy(valor->str, token.lexema);
+    } else {
+        return falha(parser, "numero ou string");
+    }
+
+    avancar_parser(parser);
+    return 1;
+}
+
+/* CREATE TABLE IDENT '(' coluna { ',' coluna } ')' ';'
+ * (o token CREATE ja foi verificado por parse_comando) */
+static int parse_create(Parser *parser, Comando *comando)
+{
+    Token token;
+
+    comando->tipo = CMD_CREATE;
+    avancar_parser(parser);                                   /* CREATE */
+
+    if (!consumir_token(parser, TOKEN_TABLE, "TABLE", NULL))  return 0;
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da tabela", &token))  return 0;
+    strcpy(comando->tabela, token.lexema);
+    if (!consumir_token(parser, TOKEN_ABRE_PARENTESE, "'('", NULL)) return 0;
+
+    for (;;) {
+        Token  nome;
+        Coluna *coluna;
+
+        if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da coluna", &nome))
+            return 0;
+
+        if (comando->numero_colunas >= MAX_COLUNAS)
+            return erro_formato(parser, &nome, "numero maximo de colunas (%d) excedido",
+                            MAX_COLUNAS);
+
+        for (int i = 0; i < comando->numero_colunas; i++)
+            if (contexto_igual(comando->colunas[i].nome, nome.lexema))
+                return erro_formato(parser, &nome, "coluna '%s' duplicada",
+                                nome.lexema);
+
+        coluna = &comando->colunas[comando->numero_colunas];
+        strcpy(coluna->nome, nome.lexema);
+
+        if (parser->atual.tipo != TOKEN_INT && parser->atual.tipo != TOKEN_CHAR)
+            return falha(parser, "INT ou CHAR");
+        coluna->tipo = parser->atual.tipo;
+        avancar_parser(parser);
+        comando->numero_colunas++;
+
+        if (parser->atual.tipo == TOKEN_VIRGULA) {
+            avancar_parser(parser);
+            continue;
+        }
+        break;
+    }
+
+    if (!consumir_token(parser, TOKEN_FECHA_PARENTESE, "')' ou ','", NULL)) return 0;
+    if (!consumir_token(parser, TOKEN_PONTO_VIRGULA, "';'", NULL)) return 0;
+    return 1;
+}
+
+/* INSERT INTO IDENT VALUES '(' valor { ',' valor } ')' ';' */
+static int parse_insert(Parser *parser, Comando *comando)
+{
+    Token token;
+
+    comando->tipo = CMD_INSERT;
+    avancar_parser(parser);                                   /* INSERT */
+
+    if (!consumir_token(parser, TOKEN_INTO, "INTO", NULL))            return 0;
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da tabela", &token))  return 0;
+    strcpy(comando->tabela, token.lexema);
+    if (!consumir_token(parser, TOKEN_VALUES, "VALUES", NULL))        return 0;
+    if (!consumir_token(parser, TOKEN_ABRE_PARENTESE, "'('", NULL))         return 0;
+
+    for (;;) {
+        if (comando->numero_valores >= MAX_VALORES)
+            return erro_formato(parser, &parser->atual,
+                            "numero maximo de valores (%d) excedido",
+                            MAX_VALORES);
+
+        if (!parse_valor(parser, &comando->valores[comando->numero_valores]))
+            return 0;
+        comando->numero_valores++;
+
+        if (parser->atual.tipo == TOKEN_VIRGULA) {
+            avancar_parser(parser);
+            continue;
+        }
+        break;
+    }
+
+    if (!consumir_token(parser, TOKEN_FECHA_PARENTESE, "')' ou ','", NULL))     return 0;
+    if (!consumir_token(parser, TOKEN_PONTO_VIRGULA, "';'", NULL))        return 0;
+    return 1;
+}
+
+/* condicao ::= IDENT operador valor */
+static int parse_condicao(Parser *parser, Condicao *condicao)
+{
+    Token token;
+
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da coluna", &token))
+        return 0;
+    strcpy(condicao->coluna, token.lexema);
+
+    if (!e_operador(parser->atual.tipo))
+        return falha(parser, "operador (=, <>, !=, <, <=, >, >=)");
+    condicao->operacao = parser->atual.tipo;
+    avancar_parser(parser);
+
+    return parse_valor(parser, &condicao->valor);
+}
+
+/* SELECT '*' FROM IDENT [ WHERE condicao { AND condicao } ] ';' */
+static int parse_select(Parser *parser, Comando *comando)
+{
+    Token token;
+
+    comando->tipo = CMD_SELECT;
+    avancar_parser(parser);                                   /* SELECT */
+
+    if (!consumir_token(parser, TOKEN_ASTERISCO, "'*'", NULL))        return 0;
+    if (!consumir_token(parser, TOKEN_FROM, "FROM", NULL))            return 0;
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da tabela", &token))  return 0;
+    strcpy(comando->tabela, token.lexema);
+
+    if (parser->atual.tipo == TOKEN_WHERE) {
+        avancar_parser(parser);
+
+        for (;;) {
+            if (comando->numero_condicoes >= MAX_CONDICOES)
+                return erro_formato(parser, &parser->atual,
+                                "numero maximo de condicoes (%d) excedido",
+                                MAX_CONDICOES);
+
+            if (!parse_condicao(parser, &comando->condicoes[comando->numero_condicoes]))
+                return 0;
+            comando->numero_condicoes++;
+
+            if (parser->atual.tipo == TOKEN_AND) {
+                avancar_parser(parser);
+                continue;
+            }
+            break;
+        }
+    }
+
+    if (!consumir_token(parser, TOKEN_PONTO_VIRGULA, "';', WHERE ou AND", NULL))
+        return 0;
+    return 1;
+}
+
+/* comando ::= create | insert | select */
+static int parse_comando(Parser *parser, Comando *comando)
+{
+    memset(comando, 0, sizeof *comando);
+
+    switch (parser->atual.tipo) {
+        case TOKEN_CREATE: return parse_create(parser, comando);
+        case TOKEN_INSERT: return parse_insert(parser, comando);
+        case TOKEN_SELECT: return parse_select(parser, comando);
+        default:         return falha(parser, "CREATE, INSERT ou SELECT");
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Impressao da AST                                                    */
+/* ------------------------------------------------------------------ */
+
+static const char *simbolo_operacao(TipoToken operacao)
+{
+    switch (operacao) {
+        case TOKEN_IGUAL:       return "=";
+        case TOKEN_DIFERENTE:   return "<>";
+        case TOKEN_MENOR:       return "<";
+        case TOKEN_MENOR_IGUAL: return "<=";
+        case TOKEN_MAIOR:       return ">";
+        case TOKEN_MAIOR_IGUAL: return ">=";
+        default:              return "?";
+    }
+}
+
+static void imprimir_valor(const Valor *valor)
+{
+    if (valor->tipo == TOKEN_NUMERO)
+        printf("%d", valor->numero);
+    else
+        printf("'%s'", valor->str);
+}
+
+static void imprimir_comando(const Comando *comando)
+{
+    switch (comando->tipo) {
+        case CMD_CREATE:
+            printf("CREATE TABLE\n");
+            printf("  tabela : %s\n", comando->tabela);
+            printf("  colunas:\n");
+            for (int i = 0; i < comando->numero_colunas; i++)
+                printf("    - %s : %s\n", comando->colunas[i].nome,
+                       nome_token(comando->colunas[i].tipo));
+            break;
+
+        case CMD_INSERT:
+            printf("INSERT\n");
+            printf("  tabela : %s\n", comando->tabela);
+            printf("  valores: ");
+            for (int i = 0; i < comando->numero_valores; i++) {
+                if (i) printf(", ");
+                imprimir_valor(&comando->valores[i]);
+            }
+            printf("\n");
+            break;
+
+        case CMD_SELECT:
+            printf("SELECT\n");
+            printf("  tabela : %s\n", comando->tabela);
+            if (comando->numero_condicoes == 0) {
+                printf("  where  : (nenhum)\n");
+            } else {
+                printf("  where  :\n");
+                for (int i = 0; i < comando->numero_condicoes; i++) {
+                    printf("    %s %s %s", i ? "AND" : "   ",
+                           comando->condicoes[i].coluna,
+                           simbolo_operacao(comando->condicoes[i].operacao));
+                    printf(" ");
+                    imprimir_valor(&comando->condicoes[i].valor);
+                    printf("\n");
+                }
+            }
+            break;
+    }
+}
+
+#ifndef DB_CRAFT_MAIN
 int main(void) {
 
     printf("\n--- Alocacao de Paginas ---\n");
@@ -889,7 +1664,7 @@ int main(void) {
     /* Garante que as paginas 0, 1 e 2 existam antes de usar a pagina 2 */
     while (total_paginas_alocadas() <= pagina_alvo) {
         if (aloca_pagina() < 0) {
-            fprintf(stderr, "Erro ao alocar paginas necessarias.\n");
+            fprintf(stderr, "Erro Ao Alocar Paginas Necessarias.\n");
             return 1;
         }
     }
@@ -921,7 +1696,7 @@ int main(void) {
     /* Calcula o byte absoluto no arquivo onde o registro foi gravado */
     long byte_absoluto = (long)pagina_alvo * TAMANHO_PAGINA + offset_na_pagina;
 
-    printf("O registro começa no byte: %ld\n", byte_absoluto);
+    printf("O Registro Começa No Byte: %ld\n", byte_absoluto);
 
     /* Serializa e desserializa um registro */
 
@@ -939,16 +1714,16 @@ int main(void) {
     
     desserializa_registro(pagina_lida + offset_na_pagina, &registro_lido);
     
-    printf("Registro relido do disco e desserializado: id=%d, valor=%d\n",
+    printf("Registro Relido Do Disco e Desserializado: ID=%d, Valor=%d\n",
            registro_lido.id, registro_lido.valor);
 
 
-     printf("\n---Cache de Paginas ---\n");
+     printf("\n ----- Cache de Paginas ----- \n");
 
     /* Garante paginas suficientes para forcar expulsao (mais paginas que frames) */
     while (total_paginas_alocadas() < NUM_FRAMES + 2) {
         if (aloca_pagina() < 0) {
-            fprintf(stderr, "Erro ao alocar paginas extras para o teste do cache.\n");
+            fprintf(stderr, "Erro Ao Alocar Paginas Extras Para O Teste Do Cache.\n");
             return 1;
         }
     }
@@ -961,7 +1736,7 @@ int main(void) {
     
     desserializa_registro(buf2 + offset_na_pagina, &lido_via_cache);
     
-    printf("[cache] pagina %d fixada -> id=%d, valor=%d\n",
+    printf("[CACHE] Pagina %d Fixada -> ID=%d, Valor=%d\n",
            pagina_alvo, lido_via_cache.id, lido_via_cache.valor);
 
     /* Modifica o registro diretamente no buffer do cache e marca a pagina como suja */
@@ -979,8 +1754,8 @@ int main(void) {
     /* fixa(2) novamente: deve ser acerto (hit) e devolver a MESMA referencia */
     unsigned char *buf2_de_novo = fixa(pagina_alvo);
     
-    printf("[cache] segunda fixacao da pagina %d -> mesma referencia? %s\n",
-           pagina_alvo, (buf2 == buf2_de_novo) ? "sim" : "nao");
+    printf("[CACHE] Segunda Fixacao Da Pagina %d -> Mesma Referencia? %s\n",
+           pagina_alvo, (buf2 == buf2_de_novo) ? "Sim" : "Nao");
     
            solta(pagina_alvo, 0);
 
@@ -1006,7 +1781,7 @@ int main(void) {
     
     desserializa_registro(pagina_verificacao + offset_na_pagina, &verificado);
     
-    printf("[cache] apos possivel expulsao, disco contem id=%d, valor=%d (esperado id=99, valor=12345)\n",
+    printf("[CACHE] Apos Possivel Expulsao, Disco Contem ID=%d, Valor=%d (Esperado ID=99, Valor=12345)\n",
            verificado.id, verificado.valor);
 
     /* descarrega() explicito: garante que qualquer pagina ainda suja no cache
@@ -1015,7 +1790,7 @@ int main(void) {
         descarrega(p);
     }
     
-    printf("\n-- Arvore B + ---\n");
+    printf("\n ---- Arvore B+ -----\n");
 
     /*
     
@@ -1040,7 +1815,7 @@ int main(void) {
     remove(ARQUIVO_BD);
 
     if (inicializa_arvore() != 0) {
-        fprintf(stderr, "Erro ao inicializar a arvore B+.\n");
+        fprintf(stderr, "Erro Ao Inicializar A B+ Tree.\n");
         return 1;
     }
 
@@ -1048,24 +1823,24 @@ int main(void) {
     
     int n = (int)(sizeof(chaves) / sizeof(chaves[0]));
 
-    printf("=== Insercoes na Arvore B+ (maximo de %d chaves por no) ===\n", MAX_CHAVES);
+    printf("\n ---- Insercoes na B+ Tree (MAXIMO: %d CHAVES POR NO) ----- \n", MAX_CHAVES);
     
     for (int i = 0; i < n; i++) {
         Registro reg = { .id = chaves[i], .valor = chaves[i] * 10 };
         int r = inserir_valor(&reg);
         if (r == INSERE_DUPLICADO) {
-            printf("\nChave %d ja existe.\n", chaves[i]);
+            printf("\n Chave %d Ja Existe.\n", chaves[i]);
             continue;
         }
         if (r != INSERE_OK) {
-            fprintf(stderr, "Erro ao inserir a chave %d\n", chaves[i]);
+            fprintf(stderr, "Erro Ao Inserir a Chave %d\n", chaves[i]);
             return 1;
         }
-        printf("\n Apos inserir %d:\n", chaves[i]);
+        printf("\n Apos Inserir %d:\n", chaves[i]);
         imprimir_arvore();
     }
 
-    printf("\n=== Busca ===\n");
+    printf("\n ------ Busca B + Tree --------\n");
     
     int32_t buscas[] = { 35, 50, 55, 40 };
     
@@ -1073,11 +1848,11 @@ int main(void) {
         Registro achado;
         int r = buscar_valor(buscas[i], &achado);
         if (r == 0) {
-            printf("busca(%d): encontrado -> id=%d, valor=%d\n", buscas[i], achado.id, achado.valor);
+            printf("Busca(%d): Encontrado -> ID=%d, Valor=%d\n", buscas[i], achado.id, achado.valor);
         } else if (r == 1) {
-            printf("busca(%d): nao encontrado\n", buscas[i]);
+            printf("Busca(%d): Nao Encontrado\n", buscas[i]);
         } else {
-            printf("busca(%d): erro\n", buscas[i]);
+            printf("Busca(%d): Erro\n", buscas[i]);
         }
     }
 
@@ -1089,6 +1864,67 @@ int main(void) {
 
     sincroniza_dados();
     
+    printf("\n ----- TOKENIZADOR ---- \n\n");
+    
+    static const char *EXEMPLO =
+      "CREATE TABLE alunos (id INT, nome CHAR);\n"
+      "INSERT INTO alunos VALUES (1, 'Ana');\n"
+      "SELECT * FROM alunos WHERE id >= 1 AND nome <> 'Bia';";
+
+    char *arquivo = NULL;
+    const char *texto = EXEMPLO;
+
+    Tokenizador t;
+    iniciar_tokenizador(&t, texto);
+
+    Parser parser;
+    iniciar_parser(&parser, texto);
+
+    printf("%-4s %-14s %-8s %s\n", "#", "TOKEN", "POSICAO", "LEXEMA");
+    printf("\n --------------------------------------------------\n");
+
+    int ordem = 0;
+    int status = 0;
+    int erros =0 ;
+    
+    
+    Token token;
+    do {
+        token = proximo_token(&t);
+        printf("%-4d %-14s %d:%-5d '%s'\n",
+               ++ordem, nome_token(token.tipo), token.linha, token.coluna, token.lexema);
+
+        if (token.tipo == TOKEN_ERRO || token.tipo == TOKEN_NAO_SUPORTADO)
+            status = 1;
+    } while (token.tipo != TOKEN_FIM);
+    
+    printf("\n ------- PARSER ------ \n\n");
+    
+    while (parser.atual.tipo != TOKEN_FIM) {
+        Comando comando;
+
+        if (parse_comando(&parser, &comando)) {
+            printf("[COMANDO %d] ", ++ordem);
+            imprimir_comando(&comando);
+        } else {
+            printf("[COMANDO %d] Erro Sintatico\n  %s\n", ++ordem, parser.mensagem);
+            erros++;
+            sincronizar(&parser);
+        }
+        printf("\n");
+    }
+
+    if (erros)
+        printf("Analise Concluida Com %d Erro(s)\n", erros);
+    else
+        printf("Analise Concluida Sem Erros\n");
+
+    free(arquivo);
+    
+    return status;
+    
+    return erros ? 1 : 0;
+    
     return 0;
 }
-#endif /* DB_CRAFT_TEST_MAIN */
+#endif /*DB_CRAFT_MAIN */
