@@ -73,6 +73,18 @@ O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colu
 
 2.**Kawe Alexander Sampaio da Silva** - `202411140041`
 
+## Como Executar
+
+1. Vá até a pasta `Main` dentro do diretório `src`
+
+2. Baixe o arquivo `main.c`
+
+3. Compile: `gcc main.c -o main` 
+
+4. Execute: `./main`
+
+O `main.c` executa as funções de todos os módulos **ordem**.
+
 ## Notas de Desenvolvimento
 
 Este projeto foi desenvolvido com o auxílio dos seguintes modelos de IA Generativa:
