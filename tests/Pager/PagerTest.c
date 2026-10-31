@@ -2,7 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "PagerHeader.h"
+/*
+ * Separa o main() do Pager.c do main() do PagerTest.c
+*/
+#define main PAGER_MAIN
+#include "Pager.c"
+#undef main
 
 static int testes_executados = 0;
 static int testes_ok = 0;
