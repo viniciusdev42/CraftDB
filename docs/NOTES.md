@@ -248,17 +248,14 @@ O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página
 
 Encontra-se no diretório `test/Pager`.
 
-Nela,temos um arquivo `Pager.c` independente que está ligado à biblioteca `PagerHeader.h`,sendo usado por `PagerMain.c`. Esses arquivos estão separados devido a tanto `PagerTest.c` quanto `PagerMain.c` possuirem seu próprio bloco `main`,impossibilitando uma compilação direta.
+Nela,temos um arquivo `Pager.c` que serve como biblioteca para `PagerTest.c`. 
 
-Para compilar e executar os arquivos,rode os seguintes comandos:
+O `main()` de `Pager.c` e `PagerTest.c` estão separados por um `#define main`,**evitando** erros de compilação.
 
-``` shell
-gcc Pager.c PagerMain.c -o Main # Linka o PagerMain.c com o Pager.c e compila 
-```
+Para compilar e executar os arquivos,rode o seguinte comando:
 
-
-``` shell
-gcc Pager.c PagerTest.c -o PagerTest # Linka o PagerTest.c com o Pager.c,compila e executa o main do PagerTest.c
+``` Shell
+gcc PagerTest.c -o PagerTest 
 ```
 
 Cada funcionalidade ganhou uma função de teste dedicada (alocação, validação, leitura/escrita, isolamento, serialização, sincronização, persistência), usando uma pequena infraestrutura própria (`verifica`/`VERIFICA`) que registra sucesso ou falha sem interromper a execução dos demais testes.
