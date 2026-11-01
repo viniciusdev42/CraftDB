@@ -248,11 +248,9 @@ O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página
 
 Encontra-se no diretório `test/Pager`.
 
-Nela,temos um arquivo `Pager.c` que serve como biblioteca para `PagerTest.c`. 
+Nele há um arquivo `PagerTest.c`,o qual depende de `Pager.c`. 
 
-O `main()` de `Pager.c` e `PagerTest.c` estão separados por um `#define main`,**evitando** erros de compilação.
-
-Para compilar e executar os arquivos,rode o seguinte comando:
+Para executar o `PagerTest.c`,coloque-o junto de `Pager.c` em um diretório separado.Para compilar e executar os arquivos,rode o seguinte comando:
 
 ``` Shell
 gcc PagerTest.c -o PagerTest 
@@ -496,7 +494,7 @@ Uma página fixada não pode ser processada por essa função devido ao bloco `i
 
 ## Suíte de Testes
 
-Localiza-se no diretório `Cache` de `tests`.Nela,temos três arquivos C:`CacheTest1.c,CacheTest2.c,CacheTest3.c`.
+Localiza-se no diretório `Cache` de `tests`.Nela,temos três arquivos de teste:
 
 O `CacheTest1.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
 
@@ -504,7 +502,9 @@ O `CacheTest2.c` testa o cache com a capacidade reduzida de 3 frames.Ele verific
 
 O `CacheTest3.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
 
-O `CacheTest.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux. Ele compila e executa a suíte dos testes de aceitação do módulo de Cache. Para executá-lo rode o seguinte comando: ` bash CacheTest.sh`.
+Para executá-los,junte-os ao arquivo `Cache.c` em um diretório separado e execute o script `CacheTest.sh`.
+
+O `CacheTest.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux.Para executá-lo rode o seguinte comando: ` bash CacheTest.sh`.
 
 ## Conclusões
 
@@ -737,7 +737,7 @@ int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagi
 
 ## Suite de Testes
 
-Encontra-se no diretório `tests/BPlusTree`. Ele inclui o `BPlusTree.c` para ter acesso às funções estáticas como `ler_no,ler_raiz,serializar_raiz` e ao estado de cache,permitindo **auditar** a estrutura interna da árvore em vez de apenas o seu comportamento externo.
+Encontra-se no diretório `tests/BPlusTree`. Ele inclui o arquivo `BPlusTest.c`,o qual depende de `BPlusTree.c`. Para que o arquivo seja executado,é preciso juntá-lo ao arquivo da B+ em um diretório separado.
 
 Os testes são executados dentro de um diretório **temporário**,logo o `craft-db.dat` não é tocado.
 
@@ -759,7 +759,7 @@ A auditoria pecorre a árvore inteira a partir de sua raiz.Ela verifica:
 
 8. Se nenhuma página foi "vazada": total = 1 (meta) + folhas + internos
 
-Pra rodar os testes rode o seguinte comando:
+Para executar o `BPlusTest.c` rode o seguinte comando:
 
 ``` Shell
 gcc BPlusTest.c -o BPlusTest
