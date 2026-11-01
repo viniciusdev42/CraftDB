@@ -18,14 +18,9 @@
  * Usa NUM_FRAMES=1 para que fixar uma segunda pagina distinta force,
  * de forma inequivoca, a expulsao da primeira (unico jeito de liberar
  * o unico frame disponivel).
- *
- * Compilar:  gcc -std=c11 -Wall -Wextra -o teste3 teste3_persistencia.c
- * Executar:  ./teste3 escritor && ./teste3 leitor
- * Saida de cada execucao: 0 em caso de sucesso, 1 em caso de falha.
  */
 
 #define NUM_FRAMES 1
-#define CRAFT_DB_TESTE_SEM_MAIN
 #include "Cache.c"
 
 #define PAGINA_TESTE   0

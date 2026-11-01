@@ -14,13 +14,8 @@
  * permite verificacoes mais rigorosas do que apenas observar o retorno
  * de fixa(). CRAFT_DB_TESTE_SEM_MAIN suprime o main() de demonstracao
  * de Cache.c para que este arquivo possa definir o seu proprio.
- *
- * Compilar:  gcc -std=c11 -Wall -Wextra -o teste1 teste1_leitura_unica.c
- * Executar:  ./teste1
- * Saida: 0 se todas as verificacoes passarem, 1 caso alguma falhe.
  */
 
-#define CRAFT_DB_TESTE_SEM_MAIN
 #include "Cache.c"
 
 static int testes_totais = 0;

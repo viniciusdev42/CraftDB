@@ -20,13 +20,9 @@
  *   fixa/solta p3                      -> FALTA, cache cheio -> expulsa
  *                                          a LRU, que deve ser p1
  *
- * Compilar:  gcc -std=c11 -Wall -Wextra -o teste2 teste2_lru_3frames.c
- * Executar:  ./teste2
- * Saida: 0 se todas as verificacoes passarem, 1 caso alguma falhe.
  */
 
 #define NUM_FRAMES 3
-#define CRAFT_DB_TESTE_SEM_MAIN
 #include "Cache.c"
 
 static int testes_totais = 0;
