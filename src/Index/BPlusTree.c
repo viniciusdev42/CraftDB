@@ -30,6 +30,16 @@
  * Fusao e redistribuicao NAO sao implementadas (nao ha remocao).
  */
 
+#ifndef B_PLUS_TREE
+#define B_PLUS_TREE
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L  
+#endif
+
+#include "Pager.c"
+#include "Cache.c"
+
 #define MAX_CHAVES   3
 #define NO_INTERNO   0
 #define NO_FOLHA     1
@@ -400,3 +410,5 @@ void imprimir_arvore(void) {
     int raiz = le_raiz();
     if (raiz >= 0) imprimir_no(raiz, 0);
 }
+
+#endif

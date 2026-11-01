@@ -16,6 +16,16 @@
  * pagina foi usada ha mais tempo.
  */
 
+#ifndef CACHE
+#define CACHE
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L 
+#endif
+
+#include "Pager.c"
+
+
 #ifndef NUM_FRAMES
 #define NUM_FRAMES 4   // capacidade do cache: numero de frames (paginas) em memoria
 #endif                 // pode ser sobrescrita em tempo de compilacao (ex.: -DNUM_FRAMES=3),
@@ -256,3 +266,5 @@ void imprime_estatisticas_cache(void) {
     printf("[cache] capacidade=%d uso=%d acertos=%ld faltas=%ld\n",
            cache.capacidade, cache.uso, cache.acertos, cache.faltas);
 }
+
+#endif
