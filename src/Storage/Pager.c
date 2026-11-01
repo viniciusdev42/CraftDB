@@ -1,4 +1,10 @@
-#define POSIX_C_SOURCE 200809L
+#ifndef PAGER
+#define PAGER
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L  
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +21,7 @@
 #define ARQUIVO_BD "craft-db.dat"
 
 /*
-   Operações de serialização e desserialização
+   Struct para operações de serialização e desserialização
 */
 
 typedef struct {
@@ -31,6 +37,12 @@ typedef struct {
 
 static long contador_leituras_disco = 0;
 
+/*  Funções internas*/
+
+static int      trava_pagina(FILE *f, int n, short tipo_trava);
+static int      escreve_pagina_buffer(int n, const unsigned char *buffer);
+static void     serializa_uint32_le(uint32_t valor, unsigned char *destino);
+static uint32_t desserializa_uint32_le(const unsigned char *origem);
 
 /* Retorna o tamanho do arquivo em bytes */
 
@@ -237,3 +249,5 @@ static uint32_t desserializa_uint32_le(const unsigned char *origem) {
            | ((uint32_t)origem[2] << 16)
            | ((uint32_t)origem[3] << 24);
 }
+
+#endif 

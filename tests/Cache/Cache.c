@@ -1,3 +1,10 @@
+#ifndef CACHE
+#define CACHE
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L 
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include<stdint.h>
@@ -184,3 +191,5 @@ void imprime_estatisticas_cache(void) {
     printf("[cache] capacidade=%d uso=%d acertos=%ld faltas=%ld\n",
            cache.capacidade, cache.uso, cache.acertos, cache.faltas);
 }
+
+#endif
