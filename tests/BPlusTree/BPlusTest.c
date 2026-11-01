@@ -2,8 +2,8 @@
  * Testes da Arvore B+ implementada em BPlusTree.c
 
  * Variacoes uteis (o cache e a arvore devem funcionar com qualquer tamanho):
- *     gcc -DNUM_FRAMES=1  -o M3_Test M3_Test.c
- *     gcc -DNUM_FRAMES=64 -o M3_Test M3_Test.c
+ *     gcc -DNUM_FRAMES=1  -o BPlusTest BPlusTest.c
+ *     gcc -DNUM_FRAMES=64 -o BPlusTest BPlusTest.c
  *
  * Este arquivo faz #include "BPlusTree" para ter acesso as funcoes static
  * (ler_no, ler_raiz, serializar_no, ...) e ao estado do cache, o que permite
@@ -25,7 +25,9 @@
 
 #define CRAFT_DB_TEST_BUILD
 
+#define main BPLUS_MAIN
 #include "BPlusTree.c"
+#undef main
 
 /* ======================================================================
  * Mini framework de testes
