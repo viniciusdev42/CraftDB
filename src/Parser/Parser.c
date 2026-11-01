@@ -24,18 +24,15 @@
  * ate o proximo ';' e continua a analisar os comandos seguintes.
  */
 
+#ifndef PARSER
+#define PARSER
+
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
 
-/*
- * Reaproveita o tokenizador sem alterar o arquivo original: o main() do
- * Tokenizer.c e renomeado so durante a inclusao, para nao colidir com o
- * main() deste arquivo.
- */
-#define main PARSER_TOKENIZER_MAIN
 #include "Tokenizer.c"
-#undef main
+
 
 /* ------------------------------------------------------------------ */
 /* Limites                                                             */

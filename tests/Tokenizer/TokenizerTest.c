@@ -3,9 +3,7 @@
 #include <string.h>
 #include <assert.h>
 
-#define main MAIN_TOKENIZER
 #include "Tokenizer.c"
-#undef main
 
 static int total_testes = 0;
 static int testes_falhos = 0;

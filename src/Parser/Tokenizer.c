@@ -10,9 +10,10 @@
  * NAO ha: juncao, ORDER BY, agregacao, subconsulta, OR.
  * Palavras dessas construcoes devolvem TOKEN_NAO_SUPORTADO.
  *
- * 
- 
  */
+
+#ifndef TOKENIZER
+#define TOKENIZER
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -357,3 +358,4 @@ static char *ler_arquivo(const char *caminho)
     fclose(f);
     return buffer;
 }
+#endif

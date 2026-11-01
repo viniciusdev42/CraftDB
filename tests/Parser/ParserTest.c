@@ -6,36 +6,23 @@
  * O Parser.c, por sua vez, inclui o Tokenizer.c.
  *
  * Compilar e executar:
- *   gcc -std=c99 -Wall -Wextra -o ParserTest ParserTest.c
+ *   cc -std=c99 -Wall -Wextra -o ParserTest ParserTest.c   (POSIX.1-2008)
  *   ./ParserTest
  *
  * Codigo de saida: 0 se todos os testes passaram, 1 caso contrario.
  *
  */
 
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L   /* dup, dup2, fileno, tmpfile */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L   
 #endif
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef _WIN32
-#include <io.h>
-#define T_DUP    _dup
-#define T_DUP2   _dup2
-#define T_CLOSE  _close
-#define T_FILENO _fileno
-#else
 #include <unistd.h>
-#define T_DUP    dup
-#define T_DUP2   dup2
-#define T_CLOSE  close
-#define T_FILENO fileno
-#endif
 
-#define PARSER_TESTE
 #include "Parser.c"
 
 /* ================================================================== */
@@ -211,15 +198,26 @@ static void captura_iniciar(void)
 {
     fflush(stdout);
     g_captura = tmpfile();
-    g_stdout_salvo = T_DUP(T_FILENO(stdout));
-    T_DUP2(T_FILENO(g_captura), T_FILENO(stdout));
+    if (g_captura == NULL) {
+        perror("tmpfile");
+        exit(EXIT_FAILURE);
+    }
+    g_stdout_salvo = dup(fileno(stdout));
+    if (g_stdout_salvo == -1 || dup2(fileno(g_captura), fileno(stdout)) == -1) {
+        perror("dup/dup2");
+        exit(EXIT_FAILURE);
+    }
 }
 
 static void captura_finalizar(char *buf, size_t tam)
 {
     fflush(stdout);
-    T_DUP2(g_stdout_salvo, T_FILENO(stdout));
-    T_CLOSE(g_stdout_salvo);
+    if (dup2(g_stdout_salvo, fileno(stdout)) == -1) {
+        perror("dup2");
+        exit(EXIT_FAILURE);
+    }
+    close(g_stdout_salvo);
+    g_stdout_salvo = -1;
     rewind(g_captura);
     size_t n = fread(buf, 1, tam - 1, g_captura);
     buf[n] = '\0';
