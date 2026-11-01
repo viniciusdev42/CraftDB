@@ -1,6 +1,6 @@
 #!/bin/bash
-# Compila e executa a suite de testes de aceitacao do cache de paginas (Cache.c.c).
-# Uso: ./executa_testes.sh
+# Compila e executa a suite de testes de aceitacao do cache de paginas (Cache.c.)
+# Uso: bash CacheTest.sh
 # Saida: 0 se todos os testes passarem; 1 se algum falhar.
 
 set -u
@@ -8,9 +8,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
 echo "Compilando os testes de aceitacao..."
-gcc -std=c11 -Wall -Wextra -o CacheTest1 CacheTest1.c || exit 2
-gcc -std=c11 -Wall -Wextra -o CacheTest2 CacheTest2.c|| exit 2
-gcc -std=c11 -Wall -Wextra -o CacheTest3 CacheTest3.c || exit 2
+gcc -std=gnu11 -Wall -Wextra -o CacheTest1 CacheTest1.c || exit 2
+gcc -std=gnu11 -Wall -Wextra -o CacheTest2 CacheTest2.c || exit 2
+gcc -std=gnu11 -Wall -Wextra -o CacheTest3 CacheTest3.c || exit 2
 
 FALHAS=0
 
