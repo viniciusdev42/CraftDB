@@ -735,6 +735,36 @@ int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagi
 6. Não há **verificação de layout** em tempo de compilação: Se `MAX_CHAVES` for aumentado demais,os nó passam de 4KB sem houver aviso. Falta `static_assert` que limite as chaves em nó internos e folhas.
 7. Falta **concorrência**: A árvore não é thread-safe e nem possuí locks.
 
+## Suite de Testes
+
+Encontra-se no diretório `tests/BPlusTree`. Ele inclui o `BPlusTree.c` para ter acesso às funções estáticas como `ler_no,ler_raiz,serializar_raiz` e ao estado de cache,permitindo **auditar** a estrutura interna da árvore em vez de apenas o seu comportamento externo.
+
+Os testes são executados dentro de um diretório **temporário**,logo o `craft-db.dat` não é tocado.
+
+A auditoria pecorre a árvore inteira a partir de sua raiz.Ela verifica:
+
+1. O tipo e o número de chaves válidos no disco
+
+2. As chaves estritamente crescentes dentro de cada nó
+
+3. Se cada chave de uma subárvore respeita os separadores do pai
+
+4. Se todas as folhas estão na mesma profundidade
+
+5. A ocupação mínima (folha não raiz >= 2 chaves; interno >= 1 chave)
+
+6. Se nenhuma página foi visitada duas vezes (sem ciclos/compartilhamento)
+
+7. Se a lista encadeada das folhas é igual a ordem de travessia em profundidade
+
+8. Se nenhuma página foi "vazada": total = 1 (meta) + folhas + internos
+
+Pra rodar os testes rode o seguinte comando:
+
+``` Shell
+gcc BPlusTest.c -o BPlusTest
+```
+
 ## Conclusões
 
 A Árvore B+ é uma estrutura de dados persistente e integrada ao chave que funciona como índice de chave primária para inserções e buscas.
