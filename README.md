@@ -79,11 +79,15 @@ O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colu
 
 2. Baixe o arquivo `main.c`
 
-3. Compile: `gcc main.c -o main` 
+3. Baixe os arquivos dos módulos `Pager,Cache,B+,Tokenizer,Parser`
 
-4. Execute: `./main`
+4. Coloque-os junto do `main`
 
-O `main.c` executa as funções de todos os módulos **ordem**.
+5. Compile com `gcc main.c -o main` 
+
+6. Execute: `./main`
+
+O `main.c` executa as funções de todos os módulos em **ordem**.
 
 ## Notas de Desenvolvimento
 
