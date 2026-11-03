@@ -35,7 +35,7 @@ static int testes_ok = 0;
 } while (0)
 
 int main(void) {
-    remove(ARQUIVO_BD); /* garante um banco de dados limpo antes do teste */
+    remove(ARQUIVO_DB); /* garante um banco de dados limpo antes do teste */
 
     printf("=== Teste 2: com 3 frames, ao tocar 4 paginas a menos usada e expulsa (LRU) ===\n");
 

@@ -28,7 +28,7 @@ static int testes_ok = 0;
 } while (0)
 
 int main(void) {
-    remove(ARQUIVO_BD); /* garante um banco de dados limpo antes do teste */
+    remove(ARQUIVO_DB); /* garante um banco de dados limpo antes do teste */
 
     printf("=== Teste 1: multiplas leituras da mesma pagina => uma unica leitura de disco (4 frames) ===\n");
 

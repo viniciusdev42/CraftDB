@@ -30,7 +30,7 @@
 
 static void modo_escritor(void) {
     printf("=== Teste 3 [Processo A - escritor] ===\n");
-    remove(ARQUIVO_BD); /* comeca de um banco vazio */
+    remove(ARQUIVO_DB); /* comeca de um banco vazio */
 
     int p0 = aloca_pagina(); /* devera ser a pagina 0, pois o arquivo comeca vazio */
     int p1 = aloca_pagina(); /* segunda pagina, usada apenas para forcar a expulsao de p0 */

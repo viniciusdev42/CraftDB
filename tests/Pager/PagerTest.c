@@ -2,12 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * Separa o main() do Pager.c do main() do PagerTest.c
-*/
-#define main PAGER_MAIN
 #include "Pager.c"
-#undef main
+
 
 static int testes_executados = 0;
 static int testes_ok = 0;
@@ -25,7 +21,7 @@ static void verifica(const char *descricao, int condicao) {
 
 /* Remove o arquivo do banco para garantir um ambiente limpo a cada teste */
 static void reinicia_banco(void) {
-    remove(ARQUIVO_BD);
+    remove(ARQUIVO_DB);
 }
 
 /* ---------------------------------------------------------------------
