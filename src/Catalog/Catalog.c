@@ -41,14 +41,10 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
-/* Reaproveita Parser.c (que ja inclui Tokenizer.c) sem o main() dele */
-#define PARSER_CATALOG
-#include "Parser.c"
-
-/* Motor de armazenamento integrado: Pager -> Cache -> Arvore B+. */
 #include "Pager.c"
 #include "Cache.c"
 #include "B_Plus_Tree.c"
+#include "Parser.c"
 
 /* ------------------------------------------------------------------ */
 /* Constantes                                                          */

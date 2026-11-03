@@ -25,7 +25,6 @@
 
 #include "Pager.c"
 
-
 #ifndef NUM_FRAMES
 #define NUM_FRAMES 4   // capacidade do cache: numero de frames (paginas) em memoria
 #endif                 // pode ser sobrescrita em tempo de compilacao (ex.: -DNUM_FRAMES=3),
@@ -255,6 +254,76 @@ int solta(int n, int suja) {
     if (suja) {
         cache.frames[idx].suja = 1; // NO-FORCE: apenas marca; nao grava agora
     }
+    return 0;
+}
+
+/*
+ descarregar_todo_cache()
+ Grava em disco todas as paginas sujas (dirty) atualmente residentes no cache.
+ As paginas continuam em cache (nao sao expulsas), apenas deixam de estar sujas.
+ Paginas fixadas tambem sao gravadas, pois a gravacao nao altera o conteudo do frame.
+
+ Em caso de falha ao gravar uma pagina, tenta gravar as demais mesmo assim,
+ para minimizar a perda de dados.
+
+ Retorna 0 se todas as paginas sujas foram gravadas com sucesso,
+ ou -1 se ao menos uma gravacao falhou.
+*/
+
+int descarregar_todo_cache(void) {
+    inicializa_cache();
+
+    int status = 0;
+
+    for (int i = 0; i < cache.capacidade; i++) {
+        if (cache.frames[i].pagina == -1) {
+            continue; // frame vazio
+        }
+        if (descarrega(cache.frames[i].pagina) != 0) {
+            status = -1; // segue tentando as demais paginas
+        }
+    }
+
+    return status;
+}
+
+/*
+ reinicia_cache()
+ Devolve o cache ao estado inicial: todos os frames vazios, sem fixacoes,
+ sem paginas sujas, e com o relogio LRU e as estatisticas (acertos/faltas) zerados.
+
+ Antes de esvaziar, grava em disco as paginas sujas (descarregar_todo_cache),
+ para nao perder modificacoes (coerente com NO-FORCE: o cache e' o unico lugar
+ onde essas alteracoes existem ate a gravacao).
+
+ Nao reinicia se:
+   - alguma pagina ainda estiver fixada (os ponteiros devolvidos por fixa()
+     ficariam invalidos); ou
+   - a gravacao de alguma pagina suja falhar (para nao descartar dados).
+ Nesses casos o cache permanece intacto.
+
+ Retorna 0 em caso de sucesso, ou -1 em caso de erro.
+*/
+
+int reinicia_cache(void) {
+    inicializa_cache();
+
+    for (int i = 0; i < cache.capacidade; i++) {
+        if (cache.frames[i].pagina != -1 && cache.frames[i].fixacoes > 0) {
+            fprintf(stderr, "Erro: nao e' possivel reiniciar o cache; pagina %d ainda esta fixada\n",
+                    cache.frames[i].pagina);
+            return -1;
+        }
+    }
+
+    if (descarregar_todo_cache() != 0) {
+        fprintf(stderr, "Erro: falha ao gravar paginas sujas; cache nao foi reiniciado\n");
+        return -1;
+    }
+
+    cache_inicializado = 0;   // forca a reexecucao da inicializacao
+    inicializa_cache();       // zera frames, uso, relogio, acertos e faltas
+
     return 0;
 }
 

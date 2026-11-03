@@ -18,7 +18,42 @@
 #define TAMANHO_REGISTRO  8   /* 8B */  
 #define REGISTROS_POR_PAGINA ((TAMANHO_PAGINA - TAMANHO_CABECALHO) / TAMANHO_REGISTRO) /* 510B */
 
-#define ARQUIVO_BD "craft-db.dat"
+#define ARQUIVO_CRAFT_DB "craft-db.dat"
+
+#define CAMINHO_ARQUIVO 256
+
+/* Arquivo de dados em uso. Comeca no padrao ARQUIVO_DB e pode ser trocado
+   em tempo de execucao por configura_arquivo(). */
+
+static char ARQUIVO_DB[CAMINHO_ARQUIVO] = ARQUIVO_CRAFT_DB;
+
+/*
+ configura_arquivo(caminho)
+ Define o arquivo de dados que o Pager passa a usar nas proximas operacoes
+ (leitura, escrita, alocacao, sincronizacao). O arquivo nao e' aberto nem criado
+ aqui: ele sera criado na primeira escrita/alocacao, se nao existir.
+
+ IMPORTANTE: o cache de paginas nao sabe qual arquivo originou cada frame.
+ Antes de trocar de arquivo, quem chama deve descarregar/reiniciar o cache
+ (reiniciar_cache()), como ja faz selecionar_arquivo_tabela().
+
+ Retorna 0 em caso de sucesso, ou -1 se o caminho for NULL, vazio ou longo demais.
+*/
+
+int configura_arquivo(const char *caminho) {
+    if (caminho == NULL || caminho[0] == '\0') {
+        fprintf(stderr, "Erro: caminho de arquivo invalido\n");
+        return -1;
+    }
+    if (strlen(caminho) >= CAMINHO_ARQUIVO) {
+        fprintf(stderr, "Erro: caminho de arquivo longo demais (maximo %d caracteres)\n",
+                CAMINHO_ARQUIVO - 1);
+        return -1;
+    }
+    strcpy(ARQUIVO_DB, caminho);
+    return 0;
+}
+
 
 /*
    Struct para operações de serialização e desserialização
@@ -48,7 +83,7 @@ static uint32_t desserializa_uint32_le(const unsigned char *origem);
 
 static long tamanho_arquivo(void) {
     long tamanho = 0;
-    FILE *f = fopen(ARQUIVO_BD, "rb");
+    FILE *f = fopen(ARQUIVO_DB, "rb");
     if (f != NULL) {
         fseek(f, 0, SEEK_END);
         tamanho = ftell(f);
@@ -93,9 +128,9 @@ int ler_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
         return -1;
     }
 
-    FILE *f = fopen(ARQUIVO_BD, "rb");
+    FILE *f = fopen(ARQUIVO_DB, "rb");
     if (f == NULL) {
-        fprintf(stderr, "Erro: nao foi possivel abrir '%s'\n", ARQUIVO_BD);
+        fprintf(stderr, "Erro: nao foi possivel abrir '%s'\n", ARQUIVO_DB);
         return -1;
     }
 
@@ -167,9 +202,9 @@ static int trava_pagina(FILE *f, int n, short tipo_trava) {
 */
 
 int sincroniza_dados(void) {
-    FILE *f = fopen(ARQUIVO_BD, "r+b");
+    FILE *f = fopen(ARQUIVO_DB, "r+b");
     if (f == NULL) {
-        fprintf(stderr, "Erro: nao foi possivel abrir '%s' para sincronizar\n", ARQUIVO_BD);
+        fprintf(stderr, "Erro: nao foi possivel abrir '%s' para sincronizar\n", ARQUIVO_DB);
         return -1;
     }
     fflush(f);
@@ -192,11 +227,11 @@ int sincroniza_dados(void) {
 */
 
 static int escreve_pagina_buffer(int n, const unsigned char *buffer) {
-    FILE *f = fopen(ARQUIVO_BD, "r+b");
+    FILE *f = fopen(ARQUIVO_DB, "r+b");
     if (f == NULL) {
-        f = fopen(ARQUIVO_BD, "w+b");
+        f = fopen(ARQUIVO_DB, "w+b");
         if (f == NULL) {
-            fprintf(stderr, "Erro: nao foi possivel abrir/criar '%s'\n", ARQUIVO_BD);
+            fprintf(stderr, "Erro: nao foi possivel abrir/criar '%s'\n", ARQUIVO_DB);
             return -1;
         }
     }

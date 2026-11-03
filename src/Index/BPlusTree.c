@@ -380,6 +380,59 @@ int inserir_valor(const Registro *reg) {
     return r;
 }
 
+/* ---------- Percurso sequencial ---------- */
+
+/*
+ percorrer_registros(cb, arg)
+ Percorre TODOS os registros da arvore em ordem crescente de id: desce da raiz
+ ate a folha mais a esquerda (sempre por filhos[0]) e segue a lista encadeada
+ de folhas (campo 'proxima').
+
+ Para cada registro chama cb(registro, arg). Se o callback devolver valor
+ diferente de 0, o percurso para antes do fim (parada antecipada, nao e' erro).
+ Cada no e' copiado por ler_no() e a pagina e' solta antes do callback, entao
+ o callback pode usar a arvore/cache sem risco de deixar paginas fixadas.
+
+ Retorna o numero de registros visitados (>= 0), ou -1 em caso de erro
+ (falha de leitura ou estrutura corrompida, como ciclo na lista de folhas).
+*/
+
+int percorrer_registros(int (*cb)(const Registro *, void *), void *arg) {
+    if (cb == NULL) return -1;
+
+    int pagina = ler_raiz();
+    if (pagina < 0) return -1;
+
+    int limite = total_paginas_alocadas();   /* nenhum caminho valido passa disso */
+    No no;
+
+    /* desce ate a folha mais a esquerda */
+    for (int passos = 0; ; passos++) {
+        if (passos > limite) return -1;
+        if (ler_no(pagina, &no) != 0) return -1;
+        if (no.tipo == NO_FOLHA) break;
+        pagina = no.filhos[0];
+    }
+
+    /* segue a lista encadeada de folhas */
+    int visitados = 0;
+    for (int folhas = 0; ; folhas++) {
+        if (folhas > limite) return -1;      /* protecao contra ciclo */
+
+        for (int i = 0; i < no.numero_chaves; i++) {
+            visitados++;
+            if (cb(&no.registros[i], arg) != 0) {
+                return visitados;            /* parada antecipada */
+            }
+        }
+
+        if (no.proxima == SEM_PAGINA) break;
+        pagina = no.proxima;
+        if (ler_no(pagina, &no) != 0) return -1;
+    }
+    return visitados;
+}
+
 /* ---------- Impressao (apoio a demonstracao) ---------- */
 
 static void imprimir_no(int pagina, int nivel) {
