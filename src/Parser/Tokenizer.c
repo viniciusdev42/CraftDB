@@ -330,32 +330,4 @@ Token proximo_token(Tokenizador *t)
     token.tipo = TOKEN_ERRO;
     return token;
 }
-
-/* ------------------------------------------------------------------ */
-/* Programa de teste                                                   */
-/* ------------------------------------------------------------------ */
-
-static char *ler_arquivo(const char *caminho)
-{
-    FILE *f = fopen(caminho, "rb");
-    if (!f) return NULL;
-
-    size_t capacidade = 1024, tamanho = 0;
-    char *buffer = malloc(capacidade);
-    if (!buffer) { fclose(f); return NULL; }
-
-    size_t lidos;
-    while ((lidos = fread(buffer + tamanho, 1, capacidade - tamanho - 1, f)) > 0) {
-        tamanho += lidos;
-        if (tamanho + 1 >= capacidade) {
-            capacidade *= 2;
-            char *novo = realloc(buffer, capacidade);
-            if (!novo) { free(buffer); fclose(f); return NULL; }
-            buffer = novo;
-        }
-    }
-    buffer[tamanho] = '\0';
-    fclose(f);
-    return buffer;
-}
 #endif
