@@ -25,9 +25,7 @@
 
 #define CRAFT_DB_TEST_BUILD
 
-#define main BPLUS_MAIN
 #include "BPlusTree.c"
-#undef main
 
 /* ======================================================================
  * Mini framework de testes
