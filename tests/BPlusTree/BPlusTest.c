@@ -144,7 +144,7 @@ static int altura_arvore(void) {
 /* ---- controle do ambiente ---------------------------------------- */
 
 static void reinicia_ambiente(void) {
-    unlink(ARQUIVO_BD);
+    unlink(ARQUIVO_DB);
     cache_inicializado = 0;       /* descarta qualquer frame (inclusive sujo) */
     inicializa_cache();
     contador_leituras_disco = 0;
@@ -1248,7 +1248,7 @@ int main(void) {
     EXECUTA(teste_estresse_contra_modelo);
 
     /* limpeza do diretorio temporario */
-    unlink(ARQUIVO_BD);
+    unlink(ARQUIVO_DB);
     if (chdir(cwd) == 0) rmdir(modelo);
 
     printf("\nResumo: %d teste(s), %d falha(s), %ld verificacao(oes)\n",
