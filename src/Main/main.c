@@ -165,9 +165,9 @@ int main(void) {
     Logo o remove() limpa o arquivo e evita a possivel falha de segmentacao
 
     */
-    remove(ARQUIVO_BD);
+    remove(ARQUIVO_DB);
 
-    if (inicializa_arvore() != 0) {
+    if (inicializar_arvore() != 0) {
         fprintf(stderr, "Erro Ao Inicializar A B+ Tree.\n");
         return 1;
     }
