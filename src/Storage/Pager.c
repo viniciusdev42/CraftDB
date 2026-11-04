@@ -74,6 +74,7 @@ static long contador_leituras_disco = 0;
 
 /*  Funções internas*/
 
+int total_paginas_alocadas(void);
 static int      trava_pagina(FILE *f, int n, short tipo_trava);
 static int      escreve_pagina_buffer(int n, const unsigned char *buffer);
 static void     serializa_uint32_le(uint32_t valor, unsigned char *destino);
