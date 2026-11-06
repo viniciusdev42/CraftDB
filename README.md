@@ -63,10 +63,6 @@ O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colu
 
 #### Módulo 5 - Executor
 
-#### Módulo 6 - Transações
-
-#### Módulo 7 - Recuperação
-
 ## Autores
 
 1.**Vinicius da Silva e Silva** - `202411140038`
@@ -75,11 +71,11 @@ O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colu
 
 ## Como Executar
 
-1. Vá até a pasta `Main` dentro do diretório `src`
+1. Vá até a pasta `Main` em `src/Main`
 
 2. Baixe o arquivo `main.c`
 
-3. Baixe os arquivos dos módulos `Pager,Cache,B+,Tokenizer,Parser`
+3. Baixe os arquivos de módulos em `src/Modules`
 
 4. Coloque-os junto do `main`
 
