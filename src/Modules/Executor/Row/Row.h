@@ -63,7 +63,7 @@ StatusRow adicionar_coluna(EsquemaRow *esquema, const char *nome,
                                         int aceita_null);
 
 /* Retorna a posicao da coluna ou -1 se nao existir. */
-int buscar_coluna(const EsquemaRow *esquema, const char *nome);
+int buscar_coluna_esquema(const EsquemaRow *esquema, const char *nome);
 
 /* Retorna a coluna na posicao 'posicao' ou NULL se for invalida. */
 const ColunaRow *coluna_esquema(const EsquemaRow *esquema, int posicao);
@@ -92,7 +92,7 @@ StatusRow iniciar_row(Row *linha, const EsquemaRow *esquema);
 int          tipo_coluna(const Row *linha);             /* -1 se invalida */
 const char  *nome_coluna(const Row *linha, int posicao);   /* NULL se invalida */
 int          tipo_coluna(const Row *linha, int posicao);   /* TipoRow ou <0   */
-int          buscar_coluna(const Row *linha, const char *nome);
+int          buscar_coluna_linha(const Row *linha, const char *nome);
 
 /* NULL: retorna 1 (NULL), 0 (nao NULL) ou codigo de erro (< 0). */
 int  null_por_posicao(const Row *linha, int posicao);
