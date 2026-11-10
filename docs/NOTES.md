@@ -1113,3 +1113,38 @@ typedef struct {
 | `SELECT` | Confere tabela, colunas do `WHERE` e tipo dos literais |
 
 O Catálogo é uma camada separada do Parser. A validação semântica é responsabilidade do catálogo,enquanto que a análise sintática é responsabilidade do parser. Dessa forma,o catálogo recebe ASTs corretas.
+
+---
+
+# Módulo 5
+
+## Introdução
+
+O Executor é uma camada responsável pela execução de consultas `SELECT` utilizando a filtragem `WHERE`,reutilizando os módulos já implementados. O seu objetivo é transformar uma representação produzida pelo `Parser` em operações sobre os dados armazenados,aplicar o predicado `WHERE` e retornar só as linhas que atendem a uma determinada condição.
+
+### Visão Geral
+
+#### Row/Tuple
+
+Trata-se da representação lógica de uma linha (tupla) de uma tabela. Ela não conhece páginas,registros ou arquivos: ela só guarda valores como INT,CHAR ou NULL. A sua conversão para o formato físico (Registro {id,valor}) é feita por outra camada (módulo).
+
+A Row guarda um ponteiro para o esquema,o qual não deve ser alterado depois que uma row for criada. Cada nome de coluna é comparado sem diferenciar maiúsculas de minúsculas. Cada posição na coluna começa com 0.
+
+``` C
+typedef enum {
+  ROW_TIPO_INT = 0,
+  ROW_TIPO_CHAR =
+}TipoRow;
+
+typedef struct {
+  char nome [MAX_NOME];
+  TipoRow tipo;
+  int tamanho;
+  int aceita_null;
+}ColunaRow;
+
+typedef struct {
+ ColunaRow colunas [MAX_Colunas];
+ int numero_colunas;
+}EsquemaRow;
+``` 
