@@ -33,10 +33,6 @@
 #ifndef B_PLUS_TREE
 #define B_PLUS_TREE
 
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L  
-#endif
-
 #include "Pager.c"
 #include "Cache.c"
 

@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
 /*
  * Catalogo do banco de dados relacional (dicionario de dados).
  *
