@@ -43,7 +43,7 @@
 
 #include "Pager.c"
 #include "Cache.c"
-#include "B_Plus_Tree.c"
+#include "BPlusTree.c"
 #include "Parser.c"
 
 /* ------------------------------------------------------------------ */

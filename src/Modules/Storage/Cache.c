@@ -99,7 +99,7 @@ int descarregar(int n) {
         return 0; // pagina limpa: nada a gravar
     }
 
-    if (escreve_pagina(n, cache.frames[idx].dados, TAMANHO_PAGINA) != 0) {
+    if (escrever_pagina(n, cache.frames[idx].dados, TAMANHO_PAGINA) != 0) {
         fprintf(stderr, "Erro: falha ao descarregar a pagina %d para o disco\n", n);
         return -1;
     }
