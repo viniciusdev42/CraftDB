@@ -8,8 +8,8 @@
  *               gravada em disco imediatamente antes da expulsao.
  *   - NO-FORCE: uma pagina suja NAO precisa ser gravada em disco
  *               no momento em que e' solta (unpin); a gravacao so
- *               acontece quando a pagina e' expulsa (_expulsa) ou
- *               quando descarrega() e' chamada explicitamente.
+ *               acontece quando a pagina e' expulsa ou
+ *               quando descarregar() e' chamada explicitamente.
  *
  * Substituicao de paginas: algoritmo LRU (Least Recently Used) -
  * dentre os frames sem fixacoes, expulsa-se sempre aquele cuja
@@ -47,10 +47,11 @@ typedef struct {
 } CachePaginas;
 
 static CachePaginas cache = { .capacidade = NUM_FRAMES };
+
 static int cache_inicializado = 0;
 
 // Inicializa (uma unica vez) todos os frames do cache como vazios
-static void inicializa_cache(void) {
+static void inicializar_cache(void) {
     if (cache_inicializado) {
         return;
     }
@@ -69,7 +70,7 @@ static void inicializa_cache(void) {
 }
 
 // Procura o indice do frame que contem a pagina n. Retorna -1 se a pagina nao estiver em cache.
-static int busca_frame(int n) {
+static int buscar_frame(int n) {
     for (int i = 0; i < cache.capacidade; i++) {
         if (cache.frames[i].pagina == n) {
             return i;
@@ -79,7 +80,7 @@ static int busca_frame(int n) {
 }
 
 /*
- descarrega(n)
+ descarregar(n)
  Grava em disco o conteudo do frame que contem a pagina n, caso essa pagina esteja
  suja (dirty). Se a pagina nao estiver em cache, ou nao estiver suja, nao faz nada.
  Apos gravar com sucesso, o frame deixa de estar sujo.
@@ -87,10 +88,10 @@ static int busca_frame(int n) {
  ou -1 em caso de erro de escrita.
 */
 
-int descarrega(int n) {
-    inicializa_cache();
+int descarregar(int n) {
+    inicializar_cache();
 
-    int idx = busca_frame(n);
+    int idx = buscar_frame(n);
     if (idx == -1) {
         return 0; // pagina nao esta em cache: nada a descarregar
     }
@@ -108,19 +109,17 @@ int descarrega(int n) {
 }
 
 /*
- _expulsa()
+ expulsar()
  Escolhe, entre os frames sem fixacoes (fixacoes == 0), aquele cuja pagina foi usada
  ha mais tempo (menor 'ultimo_uso'), segundo o algoritmo LRU, e libera esse frame.
 
  Politica STEAL: se a pagina escolhida estiver suja, ela e' gravada em disco
- (via descarrega) ANTES de o frame ser liberado - nunca se expulsa uma pagina
+ (via descarregar) ANTES de o frame ser liberado - nunca se expulsa uma pagina
  suja sem antes grava-la.
 
  Retorna o indice do frame liberado (pronto para reuso), ou -1 se nao houver
- nenhum frame elegivel para expulsao (todos os frames estao fixados).
-*/
-
-static int _expulsa(void) {
+ nenhum frame elegivel para expulsao (todos os frames estao fixados).*/
+static int expulsar(void) {
     int idx_vitima = -1;
     long menor_uso = 0;
 
@@ -144,7 +143,7 @@ static int _expulsa(void) {
 
     // STEAL: garante a gravacao de uma pagina suja antes de expulsa-la
     if (cache.frames[idx_vitima].suja) {
-        if (descarrega(cache.frames[idx_vitima].pagina) != 0) {
+        if (descarregar(cache.frames[idx_vitima].pagina) != 0) {
             fprintf(stderr, "Erro: falha ao gravar pagina suja %d antes da expulsao\n",
                     cache.frames[idx_vitima].pagina);
             return -1;
@@ -160,30 +159,28 @@ static int _expulsa(void) {
 }
 
 /*
- fixa(n)
- "Fixa" (pin) a pagina n no cache e retorna um ponteiro para o seu buffer de
+ fixar(n)
+ "fixa" (pin) a pagina n no cache e retorna um ponteiro para o seu buffer de
  TAMANHO_PAGINA bytes, trazendo-a do disco caso ainda nao esteja em memoria.
 
  - ACERTO (hit): se a pagina ja estiver em algum frame, apenas incrementa o
    contador de fixacoes e devolve A MESMA REFERENCIA (o mesmo ponteiro) ja
    associada a essa pagina - nunca uma copia nova.
  - FALTA (miss): procura um frame livre; se nao houver nenhum (uso == capacidade),
-   chama _expulsa() para liberar um frame pelo algoritmo LRU, respeitando as
+   chama expulsar() para liberar um frame pelo algoritmo LRU, respeitando as
    politicas STEAL/NO-FORCE, e entao le a pagina do disco para esse frame.
 
  Retorna NULL em caso de erro (numero de pagina invalido, ou cache cheio com
- todos os frames fixados, ou falha de leitura em disco).
-*/
-
-unsigned char *fixa(int n) {
-    inicializa_cache();
+ todos os frames fixados, ou falha de leitura em disco).*/
+unsigned char *fixar(int n) {
+    inicializar_cache();
 
     if (n < 0 || n >= total_paginas_alocadas()) {
-        fprintf(stderr, "Erro: tentativa de fixar pagina invalida (%d)\n", n);
+        fprintf(stderr, "Erro: tentativa de fixa pagina invalida (%d)\n", n);
         return NULL;
     }
 
-    int idx = busca_frame(n);
+    int idx = buscar_frame(n);
     if (idx != -1) {
         // ACERTO: a pagina ja esta em cache -> devolve a mesma referencia
         cache.acertos++;
@@ -196,7 +193,7 @@ unsigned char *fixa(int n) {
     cache.faltas++;
 
     if (cache.uso >= cache.capacidade) {
-        idx = _expulsa();
+        idx = expulsar();
         if (idx == -1) {
             return NULL; // cache cheio, todos os frames fixados
         }
@@ -224,23 +221,21 @@ unsigned char *fixa(int n) {
 }
 
 /*
- solta(n, suja)
+ soltar(n, suja)
  "Solta" (unpin) a pagina n, decrementando seu contador de fixacoes em 1.
  O parametro 'suja' indica se a pagina foi modificada enquanto estava fixada:
  se for diferente de 0, o frame passa a ser marcado como sujo (dirty).
 
  Politica NO-FORCE: soltar uma pagina suja NAO a grava em disco imediatamente;
- a gravacao so ocorre quando o frame e' expulso (_expulsa) ou quando
- descarrega() e' chamada explicitamente.
+ a gravacao so ocorre quando o frame e' expulso (expulsa) ou quando
+ descarregar() e' chamada explicitamente.
 
  Retorna 0 em caso de sucesso, ou -1 em caso de erro (pagina nao esta em cache,
- ou ja estava com o contador de fixacoes em zero).
-*/
+ ou ja estava com o contador de fixacoes em zero).*/
+int soltar(int n, int suja) {
+    inicializar_cache();
 
-int solta(int n, int suja) {
-    inicializa_cache();
-
-    int idx = busca_frame(n);
+    int idx = buscar_frame(n);
     if (idx == -1) {
         fprintf(stderr, "Erro: tentativa de soltar a pagina %d, que nao esta em cache\n", n);
         return -1;
@@ -267,11 +262,9 @@ int solta(int n, int suja) {
  para minimizar a perda de dados.
 
  Retorna 0 se todas as paginas sujas foram gravadas com sucesso,
- ou -1 se ao menos uma gravacao falhou.
-*/
-
+ ou -1 se ao menos uma gravacao falhou.*/
 int descarregar_todo_cache(void) {
-    inicializa_cache();
+    inicializar_cache();
 
     int status = 0;
 
@@ -279,7 +272,7 @@ int descarregar_todo_cache(void) {
         if (cache.frames[i].pagina == -1) {
             continue; // frame vazio
         }
-        if (descarrega(cache.frames[i].pagina) != 0) {
+        if (descarregar(cache.frames[i].pagina) != 0) {
             status = -1; // segue tentando as demais paginas
         }
     }
@@ -288,7 +281,7 @@ int descarregar_todo_cache(void) {
 }
 
 /*
- reinicia_cache()
+ reiniciar_cache()
  Devolve o cache ao estado inicial: todos os frames vazios, sem fixacoes,
  sem paginas sujas, e com o relogio LRU e as estatisticas (acertos/faltas) zerados.
 
@@ -297,16 +290,14 @@ int descarregar_todo_cache(void) {
  onde essas alteracoes existem ate a gravacao).
 
  Nao reinicia se:
-   - alguma pagina ainda estiver fixada (os ponteiros devolvidos por fixa()
+   - alguma pagina ainda estiver fixada (os ponteiros devolvidos por fixar()
      ficariam invalidos); ou
    - a gravacao de alguma pagina suja falhar (para nao descartar dados).
  Nesses casos o cache permanece intacto.
 
- Retorna 0 em caso de sucesso, ou -1 em caso de erro.
-*/
-
-int reinicia_cache(void) {
-    inicializa_cache();
+ Retorna 0 em caso de sucesso, ou -1 em caso de erro.*/
+int reiniciar_cache(void) {
+    inicializar_cache();
 
     for (int i = 0; i < cache.capacidade; i++) {
         if (cache.frames[i].pagina != -1 && cache.frames[i].fixacoes > 0) {
@@ -322,18 +313,14 @@ int reinicia_cache(void) {
     }
 
     cache_inicializado = 0;   // forca a reexecucao da inicializacao
-    inicializa_cache();       // zera frames, uso, relogio, acertos e faltas
+    inicializar_cache();       // zera frames, uso, relogio, acertos e faltas
 
     return 0;
 }
 
-/*
- Imprime as estatisticas atuais do cache: capacidade, uso, acertos e faltas.
-*/
-
-void imprime_estatisticas_cache(void) {
+/*Imprime as estatisticas atuais do cache: capacidade, uso, acertos e faltas.*/
+void imprimir_estatisticas_cache(void) {
     printf("[cache] capacidade=%d uso=%d acertos=%ld faltas=%ld\n",
            cache.capacidade, cache.uso, cache.acertos, cache.faltas);
 }
-
 #endif

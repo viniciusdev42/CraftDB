@@ -281,8 +281,8 @@ static int catalogo_validar_select(Catalogo *cat, const Comando *cmd)
 static int selecionar_arquivo_tabela(Catalogo *cat, const TabelaCat *tabela) {
     if (reiniciar_cache() != 0)
         return erro_cat(cat, "nao foi possivel descarregar/reiniciar a cache");
-    configura_arquivo(tabela->arquivo);
-    if (inicializa_arvore() != 0)
+    configurar_arquivo(tabela->arquivo);
+    if (inicializar_arvore() != 0)
         return erro_cat(cat, "nao foi possivel inicializar a arvore B+ de '%s'", tabela->nome);
     return 1;
 }
@@ -320,7 +320,7 @@ static int catalogo_executar_insert(Catalogo *cat, const Comando *cmd) {
         return erro_cat(cat, "chave duplicada: '%s' deve ser unica na tabela '%s'", tabela->colunas[0].nome, tabela->nome);
     if (r != INSERE_OK)
         return erro_cat(cat, "falha ao inserir registro na arvore B+ de '%s'", tabela->nome);
-    if (descarregar_todo_cache() != 0 || sincroniza_dados() != 0)
+    if (descarregar_todo_cache() != 0 || sincronizar_dados() != 0)
         return erro_cat(cat, "falha ao persistir registro da tabela '%s'", tabela->nome);
     return 1;
 }
@@ -422,7 +422,7 @@ static int catalogo_executar(Catalogo *cat, const Comando *cmd)
             if (!catalogo_adicionar_tabela(cat, cmd->tabela, cmd->colunas, cmd->numero_colunas)) return 0;
             const TabelaCat *t = catalogo_buscar_tabela(cat, cmd->tabela);
             if (!selecionar_arquivo_tabela(cat, t)) { cat->numero_tabelas--; return 0; }
-            if (descarregar_todo_cache() != 0 || sincroniza_dados() != 0)
+            if (descarregar_todo_cache() != 0 || sincronizar_dados() != 0)
                 return erro_cat(cat, "falha ao persistir estrutura da tabela '%s'", t->nome);
             return 1;
         }

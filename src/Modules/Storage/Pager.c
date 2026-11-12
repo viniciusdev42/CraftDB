@@ -23,12 +23,12 @@
 #define CAMINHO_ARQUIVO 256
 
 /* Arquivo de dados em uso. Comeca no padrao ARQUIVO_DB e pode ser trocado
-   em tempo de execucao por configura_arquivo(). */
+   em tempo de execucao por configurar_arquivo(). */
 
 static char ARQUIVO_DB[CAMINHO_ARQUIVO] = ARQUIVO_CRAFT_DB;
 
 /*
- configura_arquivo(caminho)
+ configurar_arquivo(caminho)
  Define o arquivo de dados que o Pager passa a usar nas proximas operacoes
  (leitura, escrita, alocacao, sincronizacao). O arquivo nao e' aberto nem criado
  aqui: ele sera criado na primeira escrita/alocacao, se nao existir.
@@ -40,7 +40,7 @@ static char ARQUIVO_DB[CAMINHO_ARQUIVO] = ARQUIVO_CRAFT_DB;
  Retorna 0 em caso de sucesso, ou -1 se o caminho for NULL, vazio ou longo demais.
 */
 
-int configura_arquivo(const char *caminho) {
+int configurar_arquivo(const char *caminho) {
     if (caminho == NULL || caminho[0] == '\0') {
         fprintf(stderr, "Erro: caminho de arquivo invalido\n");
         return -1;
@@ -55,10 +55,7 @@ int configura_arquivo(const char *caminho) {
 }
 
 
-/*
-   Struct para operações de serialização e desserialização
-*/
-
+/* Struct para operações de serialização e desserialização*/
 typedef struct {
     int32_t id;
     int32_t valor;
@@ -67,21 +64,17 @@ typedef struct {
 /* Contador global de leituras físicas de página em disco (incrementado apenas
    dentro de ler_pagina(), em toda leitura bem-sucedida). Serve como uma sonda
    independente das estatísticas do cache, util para testes de aceitação que
-   precisam confirmar que uma página foi de fato lida do disco (ou não). 
-*/
-
+   precisam confirmar que uma página foi de fato lida do disco (ou não). */
 static long contador_leituras_disco = 0;
 
-/*  Funções internas*/
-
+/* Funções internas*/
 int total_paginas_alocadas(void);
-static int      trava_pagina(FILE *f, int n, short tipo_trava);
-static int      escreve_pagina_buffer(int n, const unsigned char *buffer);
-static void     serializa_uint32_le(uint32_t valor, unsigned char *destino);
-static uint32_t desserializa_uint32_le(const unsigned char *origem);
+static int      travar_pagina(FILE *f, int n, short tipo_trava);
+static int      escrever_pagina_buffer(int n, const unsigned char *buffer);
+static void     serializar_uint32_little_endian(uint32_t valor, unsigned char *destino);
+static uint32_t desserializar_uint32_little_endian(const unsigned char *origem);
 
 /* Retorna o tamanho do arquivo em bytes */
-
 static long tamanho_arquivo(void) {
     long tamanho = 0;
     FILE *f = fopen(ARQUIVO_DB, "rb");
@@ -94,30 +87,47 @@ static long tamanho_arquivo(void) {
 }
 
 /*
-Aloca uma nova pagina no fim do arquivo e retorna o numero da pagina recem criada (ou -1 em caso de erro) 
+ Trava (ou destrava) o intervalo de bytes pertencente a pagina n.
+ Como a trava cobre apenas os bytes da propria pagina, uma escrita na pagina n 
+ nunca disputa nem interfere com os bytes de qualquer outra pagina m != n,
+ mesmo havendo acessos concorrentes ao arquivo.
+ O tipo_trava deve ser F_RDLCK (leitura), F_WRLCK (escrita) ou F_UNLCK.
 */
+static int travar_pagina(FILE *f, int n, short tipo_trava) {
+    struct flock trava;
+    memset(&trava, 0, sizeof(trava));
+    trava.l_type   = tipo_trava;
+    trava.l_whence = SEEK_SET;
+    trava.l_start  = (long)n * TAMANHO_PAGINA;
+    trava.l_len    = TAMANHO_PAGINA;
 
-int aloca_pagina(void) {
-    int nova_pagina = total_paginas_alocadas();
-    unsigned char pagina_vazia[TAMANHO_PAGINA];
-    memset(pagina_vazia, 0, TAMANHO_PAGINA);
-
-    if (escreve_pagina_buffer(nova_pagina, pagina_vazia) != 0) {
+    if (fcntl(fileno(f), F_SETLKW, &trava) == -1) {
+        fprintf(stderr, "Erro: falha ao travar a pagina %d\n", n);
         return -1;
     }
-    return nova_pagina;
+    return 0;
 }
 
 int total_paginas_alocadas(void) {
     return (int)(tamanho_arquivo() / TAMANHO_PAGINA);
 }
 
+/* Aloca uma nova pagina no fim do arquivo e retorna o numero da pagina recem criada (ou -1 em caso de erro) */
+int alocar_pagina(void) {
+    int nova_pagina = total_paginas_alocadas();
+    unsigned char pagina_vazia[TAMANHO_PAGINA];
+    memset(pagina_vazia, 0, TAMANHO_PAGINA);
+
+    if (escrever_pagina_buffer(nova_pagina, pagina_vazia) != 0) {
+        return -1;
+    }
+    return nova_pagina;
+}
+
 /*
  Lê 4KB da página n do arquivo e para dentro do buffer.
  Valida o numero da pagina (caso exista) e o tamanho do buffer recebido (deve ser exatamente 4KB).
- Retorna 0 em caso de sucesso,ou -1 em caso de erro.
- */
- 
+ Retorna 0 em caso de sucesso,ou -1 em caso de erro.*/
 int ler_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
     if (buffer == NULL || tamanho_buffer != TAMANHO_PAGINA) {
         fprintf(stderr, "Erro: buffer invalido (deve ter exatamente %d bytes)\n", TAMANHO_PAGINA);
@@ -135,7 +145,7 @@ int ler_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
         return -1;
     }
 
-    if (trava_pagina(f, n, F_RDLCK) != 0) {
+    if (travar_pagina(f, n, F_RDLCK) != 0) {
         fclose(f);
         return -1;
     }
@@ -143,66 +153,76 @@ int ler_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
     fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
     if (fread(buffer, 1, TAMANHO_PAGINA, f) != TAMANHO_PAGINA) {
         fprintf(stderr, "Erro: falha ao ler a pagina %d\n", n);
-        trava_pagina(f, n, F_UNLCK);
+        travar_pagina(f, n, F_UNLCK);
         fclose(f);
         return -1;
     }
 
-    trava_pagina(f, n, F_UNLCK);
+    travar_pagina(f, n, F_UNLCK);
     fclose(f);
     contador_leituras_disco++;
+    return 0;
+}
+
+/* 
+  Escreve 4KB de buffer na posicao da pagina n do arquivo.
+  A escrita fica delimitada ao intervalo exato de bytes da pagina n
+  possuindo o mesmo offset de inicio, e o mesmo tamanho fixo de TAMANHO_PAGINA.
+  É protegida por uma trava (F_WRLCK) restrita a esse mesmo intervalo,
+  garantindo que os bytes de outras paginas nunca sejam tocados.
+  É usada por escrever_pagina() e alocar_pagina() */
+static int escrever_pagina_buffer(int n, const unsigned char *buffer) {
+    FILE *f = fopen(ARQUIVO_DB, "r+b");
+    if (f == NULL) {
+        f = fopen(ARQUIVO_DB, "w+b");
+        if (f == NULL) {
+            fprintf(stderr, "Erro: nao foi possivel abrir/criar '%s'\n", ARQUIVO_DB);
+            return -1;
+        }
+    }
+
+    if (travar_pagina(f, n, F_WRLCK) != 0) {
+        fclose(f);
+        return -1;
+    }
+
+    fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
+    if (fwrite(buffer, 1, TAMANHO_PAGINA, f) != TAMANHO_PAGINA) {
+        fprintf(stderr, "Erro: falha ao escrever a pagina %d\n", n);
+        travar_pagina(f, n, F_UNLCK);
+        fclose(f);
+        return -1;
+    }
+
+    fflush(f);
+    fsync(fileno(f));
+
+    travar_pagina(f, n, F_UNLCK);
+    fclose(f);
     return 0;
 }
 
 /*
   Escreve os 4KB de buffer na página n do arquivo,a qual precisa ter sido alocada previamente.
   Tambem valida o numero da pagina e o tamanho do buffer recebido.
-  Retorna 0 em caso de sucesso,ou -1 em caso de erro.
- */
- 
-int escreve_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
+  Retorna 0 em caso de sucesso,ou -1 em caso de erro.*/
+int escrever_pagina(int n, unsigned char *buffer, size_t tamanho_buffer) {
     if (buffer == NULL || tamanho_buffer != TAMANHO_PAGINA) {
         fprintf(stderr, "Erro: buffer invalido (deve ter exatamente %d bytes)\n", TAMANHO_PAGINA);
         return -1;
     }
     if (n < 0 || n >= total_paginas_alocadas()) {
-        fprintf(stderr, "Erro: pagina %d nao foi alocada. Use aloca_pagina() antes de escrever.\n", n);
+        fprintf(stderr, "Erro: pagina %d nao foi alocada. Use alocar_pagina() antes de escrever.\n", n);
         return -1;
     }
 
-    return escreve_pagina_buffer(n, buffer);
+    return escrever_pagina_buffer(n, buffer);
 }
-
-/*
- Trava (ou destrava) o intervalo de bytes pertencente a pagina n.
- Como a trava cobre apenas os bytes da propria pagina, uma escrita na pagina n 
- nunca disputa nem interfere com os bytes de qualquer outra pagina m != n,
- mesmo havendo acessos concorrentes ao arquivo.
- O tipo_trava deve ser F_RDLCK (leitura), F_WRLCK (escrita) ou F_UNLCK.
-*/
-
-static int trava_pagina(FILE *f, int n, short tipo_trava) {
-    struct flock trava;
-    memset(&trava, 0, sizeof(trava));
-    trava.l_type   = tipo_trava;
-    trava.l_whence = SEEK_SET;
-    trava.l_start  = (long)n * TAMANHO_PAGINA;
-    trava.l_len    = TAMANHO_PAGINA;
-
-    if (fcntl(fileno(f), F_SETLKW, &trava) == -1) {
-        fprintf(stderr, "Erro: falha ao travar a pagina %d\n", n);
-        return -1;
-    }
-    return 0;
-}
-
 
 /*
   Garante que os dados mantenham-se persistidos.
-  Retorna 0 em caso de sucesso,ou -1 em caso de erro
-*/
-
-int sincroniza_dados(void) {
+  Retorna 0 em caso de sucesso,ou -1 em caso de erro */
+  int sincronizar_dados(void) {
     FILE *f = fopen(ARQUIVO_DB, "r+b");
     if (f == NULL) {
         fprintf(stderr, "Erro: nao foi possivel abrir '%s' para sincronizar\n", ARQUIVO_DB);
@@ -218,59 +238,9 @@ int sincroniza_dados(void) {
     return 0;
 }
 
-/* 
-  Escreve 4KB de buffer na posicao da pagina n do arquivo.
-  A escrita fica delimitada ao intervalo exato de bytes da pagina n
-  possuindo o mesmo offset de inicio, e o mesmo tamanho fixo de TAMANHO_PAGINA.
-  É protegida por uma trava (F_WRLCK) restrita a esse mesmo intervalo,
-  garantindo que os bytes de outras paginas nunca sejam tocados.
-  É usada por escreve_pagina() e aloca_pagina()
-*/
-
-static int escreve_pagina_buffer(int n, const unsigned char *buffer) {
-    FILE *f = fopen(ARQUIVO_DB, "r+b");
-    if (f == NULL) {
-        f = fopen(ARQUIVO_DB, "w+b");
-        if (f == NULL) {
-            fprintf(stderr, "Erro: nao foi possivel abrir/criar '%s'\n", ARQUIVO_DB);
-            return -1;
-        }
-    }
-
-    if (trava_pagina(f, n, F_WRLCK) != 0) {
-        fclose(f);
-        return -1;
-    }
-
-    fseek(f, (long)n * TAMANHO_PAGINA, SEEK_SET);
-    if (fwrite(buffer, 1, TAMANHO_PAGINA, f) != TAMANHO_PAGINA) {
-        fprintf(stderr, "Erro: falha ao escrever a pagina %d\n", n);
-        trava_pagina(f, n, F_UNLCK);
-        fclose(f);
-        return -1;
-    }
-
-    fflush(f);
-    fsync(fileno(f));
-
-    trava_pagina(f, n, F_UNLCK);
-    fclose(f);
-    return 0;
-}
-
-void serializa_registro(const Registro *registro, unsigned char *buffer) {
-    serializa_uint32_le((uint32_t)registro->id, buffer);
-    serializa_uint32_le((uint32_t)registro->valor, buffer + 4);
-}
-
-void desserializa_registro(const unsigned char *buffer, Registro *registro) {
-    registro->id    = (int32_t)desserializa_uint32_le(buffer);
-    registro->valor = (int32_t)desserializa_uint32_le(buffer + 4);
-}
-
 /* Escreve um uint32_t em 4 bytes, sempre em little-endian, byte a byte.
  * Nao depende do endianness nativo da CPU (nao usa memcpy nem union). */
-static void serializa_uint32_le(uint32_t valor, unsigned char *destino) {
+static void serializar_uint32_little_endian(uint32_t valor, unsigned char *destino) {
     destino[0] = (unsigned char)(valor & 0xFF);
     destino[1] = (unsigned char)((valor >> 8) & 0xFF);
     destino[2] = (unsigned char)((valor >> 16) & 0xFF);
@@ -278,12 +248,20 @@ static void serializa_uint32_le(uint32_t valor, unsigned char *destino) {
 }
 
 /* Le 4 bytes em little-endian e reconstroi o uint32_t original. */
-
-static uint32_t desserializa_uint32_le(const unsigned char *origem) {
+static uint32_t desserializar_uint32_little_endian(const unsigned char *origem) {
     return   (uint32_t)origem[0]
            | ((uint32_t)origem[1] << 8)
            | ((uint32_t)origem[2] << 16)
            | ((uint32_t)origem[3] << 24);
 }
 
+void serializar_registro(const Registro *registro, unsigned char *buffer) {
+    serializar_uint32_little_endian((uint32_t)registro->id, buffer);
+    serializar_uint32_little_endian((uint32_t)registro->valor, buffer + 4);
+}
+
+void desserializar_registro(const unsigned char *buffer, Registro *registro) {
+    registro->id    = (int32_t)desserializar_uint32_little_endian(buffer);
+    registro->valor = (int32_t)desserializar_uint32_little_endian(buffer + 4);
+}
 #endif 
