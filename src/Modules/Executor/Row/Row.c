@@ -1,8 +1,103 @@
-#include "Row.h"
+/*
+ *  ------------- Representacao logica de uma linha da tabela -------------
+ *
+ * Uma Row NAO conhece paginas, Registro, B+ ou arquivos: ela apenas guarda
+ * valores tipados (INT, CHAR ou NULL) de acordo com um RowEsquema, que por
+ * sua vez espelha as colunas definidas no catalogo. A conversao entre Row e
+ * o formato fisico (Registro {id, valor}) e responsabilidade de uma camada
+ * superior/adaptadora.
+ 
+ * Ciclo de vida:
+ *   1. RowEsquema esq;  row_esquema_iniciar(&esq);
+ *   2. row_esquema_adicionar_coluna(&esq, ...)   (uma vez por coluna)
+ *   3. Row linha;       row_iniciar(&linha, &esq);   (todas as colunas NULL)
+ *   4. row_definir_*(...) / row_obter_*(...)
+ *
+ * Regras:
+ *   - A Row guarda um PONTEIRO para o esquema (nao o copia): o esquema deve
+ *     viver mais que todas as Rows que o usam e nao deve ser alterado depois
+ *     que Rows forem criadas.
+ *   - Nomes de coluna sao comparados sem diferenciar maiusculas/minusculas.
+ *   - Posicoes de coluna comecam em 0.
+ * 
+*/
 
+#ifndef ROW
+#define ROW
+
+#include <stddef.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef MAX_COLUNAS
+#define MAX_COLUNAS 16      /* ajuste para o MAX_COLUNAS do parser    */
+#endif
+
+#ifndef MAX_NOME
+#define MAX_NOME 64         /* ajuste para o MAX_LEXEMA do parser     */
+#endif
+
+#ifndef MAX_TEXTO
+#define MAX_TEXTO 32        /* maximo de caracteres de um CHAR        */
+#endif
+
+#define TAM_INT 4           /* mesmo valor de TAM_INT do catalogo     */
+
+/* Tipos de coluna (independentes de TOKEN_INT / TOKEN_CHAR do parser). */
+typedef enum {
+    ROW_TIPO_INT = 0,
+    ROW_TIPO_CHAR
+} TipoRow;
+
+/* Codigos de retorno: 0 = sucesso, valores negativos = erro. */
+typedef enum {
+    ROW_OK                      =  0,
+    ROW_ERRO_ARGUMENTO          = -1,  /* ponteiro nulo / argumento invalido   */
+    ROW_ERRO_COLUNA_INEXISTENTE = -2,  /* posicao ou nome nao existe           */
+    ROW_ERRO_TIPO               = -3,  /* tipo do valor difere do da coluna    */
+    ROW_ERRO_TAMANHO            = -4,  /* texto maior que a capacidade da col. */
+    ROW_ERRO_NULL_PROIBIDO      = -5,  /* NULL em coluna que nao aceita NULL   */
+    ROW_ERRO_VALOR_NULL         = -6,  /* leitura de valor que esta NULL       */
+    ROW_ERRO_ESQUEMA_CHEIO      = -7,  /* MAX_COLUNAS atingido             */
+    ROW_ERRO_COLUNA_DUPLICADA   = -8,
+    ROW_ERRO_NOME_INVALIDO      = -9,
+    ROW_ERRO_BUFFER_PEQUENO     = -10
+}StatusRow;
+
+/* ------------------------------------------------------------------ */
+/* Esquema                                                             */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    char    nome[MAX_NOME];
+    TipoRow tipo;
+    int     tamanho;      /* INT: TAM_INT; CHAR: maximo de caracteres */
+    int     aceita_null;  /* 0 = NOT NULL, 1 = aceita NULL                */
+} ColunaRow;
+
+typedef struct {
+    ColunaRow colunas[MAX_COLUNAS];
+    int       numero_colunas;
+} EsquemaRow;
+
+/* ------------------------------------------------------------------ */
+/* Row                                                                 */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    int nulo;                          /* 1 = valor NULL                 */
+    union {
+        int32_t inteiro;
+        char    texto[MAX_TEXTO + 1];
+    } dado;
+} ValorRow;
+
+typedef struct {
+    const EsquemaRow *esquema;         /* nao pertence a Row             */
+    ValorRow valores[MAX_COLUNAS];
+} Row;
 
 /* ------------------------------------------------------------------ */
 /* Auxiliares internos                                                 */
@@ -52,7 +147,7 @@ static RowStatus resolver_posicao(const Row *linha, const char *nome, int *posic
     if (!linha_valida(linha) || nome == NULL || posicao == NULL)
         return ROW_ERRO_ARGUMENTO;
 
-    *posicao =  buscar_coluna_esquema(linha->esquema, nome);
+    *posicao =  buscar_coluna(linha->esquema, nome);
     return (*posicao < 0) ? ROW_ERRO_COLUNA_INEXISTENTE : ROW_OK;
 }
 
@@ -66,6 +161,7 @@ void iniciar_esquema(EsquemaRow *esquema)
         memset(esquema, 0, sizeof *esquema);
 }
 
+/* Para colunas INT o parametro 'tamanho' e ignorado (fixo em TAM_INT). */
 RowStatus adicionar_coluna(EsquemaRow *esquema, const char *nome,
                                        TipoRow tipo, int tamanho,
                                        int aceita_null)
@@ -78,7 +174,7 @@ RowStatus adicionar_coluna(EsquemaRow *esquema, const char *nome,
         return ROW_ERRO_ESQUEMA_CHEIO;
     if (!nome_valido(nome))
         return ROW_ERRO_NOME_INVALIDO;
-    if ( buscar_coluna_esquema(esquema, nome) >= 0)
+    if ( buscar_coluna(esquema, nome) >= 0)
         return ROW_ERRO_COLUNA_DUPLICADA;
 
     if (tipo == ROW_TIPO_INT) {
@@ -101,7 +197,8 @@ RowStatus adicionar_coluna(EsquemaRow *esquema, const char *nome,
     return ROW_OK;
 }
 
-int  buscar_coluna_esquema(const EsquemaRow *esquema, const char *nome)
+/* Retorna a posicao da coluna ou -1 se nao existir. */
+int  buscar_coluna(const EsquemaRow *esquema, const char *nome)
 {
     if (esquema == NULL || nome == NULL)
         return -1;
@@ -111,7 +208,8 @@ int  buscar_coluna_esquema(const EsquemaRow *esquema, const char *nome)
     return -1;
 }
 
-const ColunaRow *coluna_esquema(const EsquemaRow *esquema, int posicao)
+/* Retorna a coluna na posicao 'posicao' ou NULL se for invalida. */
+const ColunaRow *coluna_posicao_esquema(const EsquemaRow *esquema, int posicao)
 {
     if (esquema == NULL || posicao < 0 || posicao >= esquema->numero_colunas)
         return NULL;
@@ -122,6 +220,7 @@ const ColunaRow *coluna_esquema(const EsquemaRow *esquema, int posicao)
 /* Criacao e metadados                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Cria uma linha com todas as colunas NULL. */
 RowStatus iniciar_row(Row *linha, const EsquemaRow *esquema)
 {
     if (linha == NULL || esquema == NULL)
@@ -153,15 +252,16 @@ int tipo_coluna(const Row *linha, int posicao)
     return (int)linha->esquema->colunas[posicao].tipo;
 }
 
-int buscar_coluna_linha(const Row *linha, const char *nome)
+int buscar_coluna_por_nome(const Row *linha, const char *nome)
 {
-    return linha_valida(linha) ?  buscar_coluna_linha(linha->esquema, nome) : -1;
+    return linha_valida(linha) ?  buscar_coluna_por_nome(linha->esquema, nome) : -1;
 }
 
 /* ------------------------------------------------------------------ */
 /* NULL                                                                */
 /* ------------------------------------------------------------------ */
 
+/* NULL: retorna 1 (NULL), 0 (nao NULL) ou codigo de erro (< 0). */
 int null_por_posicao(const Row *linha, int posicao)
 {
     if (!linha_valida(linha))
@@ -182,6 +282,7 @@ int null_por_nome(const Row *linha, const char *nome)
 /* Escrita                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Escrita por posicao */
 RowStatus definir_inteiro(Row *linha, int posicao, int32_t valor)
 {
     if (!linha_valida(linha))
@@ -258,6 +359,10 @@ RowStatus definir_null_por_nome(Row *linha, const char *nome)
 /* Leitura                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Leitura por posicao. Em valor NULL retornam ROW_ERRO_VALOR_NULL.
+ * O ponteiro devolvido por row_obter_texto aponta para dentro da Row e
+ * vale enquanto a Row existir e o valor nao for alterado. */
+ 
 RowStatus obter_inteiro(const Row *linha, int posicao, int32_t *saida)
 {
     if (!linha_valida(linha) || saida == NULL)
@@ -288,6 +393,7 @@ RowStatus obter_texto(const Row *linha, int posicao, const char **saida)
     return ROW_OK;
 }
 
+/* Leitura por nome */
 RowStatus obter_inteiro_por_nome(const Row *linha, const char *nome, int32_t *saida)
 {
     int posicao;
@@ -306,6 +412,9 @@ RowStatus obter_texto_por_nome(const Row *linha, const char *nome, const char **
 /* Validacao e formatacao                                              */
 /* ------------------------------------------------------------------ */
 
+/* Verifica as restricoes NOT NULL. Em caso de falha retorna
+ * ROW_ERRO_NULL_PROIBIDO e, se 'coluna_invalida' != NULL, a posicao da
+ * primeira coluna violada. */
 RowStatus validar(const Row *linha, int *coluna_invalida)
 {
     if (!linha_valida(linha))
@@ -321,6 +430,8 @@ RowStatus validar(const Row *linha, int *coluna_invalida)
     return ROW_OK;
 }
 
+/* Escreve o valor da coluna como texto legivel: NULL -> "NULL",
+ * INT -> "42", CHAR -> "'abc'". */
 RowStatus formatar_valor(const Row *linha, int posicao, char *saida, size_t capacidade)
 {
     int escritos;
@@ -340,6 +451,7 @@ RowStatus formatar_valor(const Row *linha, int posicao, char *saida, size_t capa
     return (escritos < 0 || (size_t)escritos >= capacidade) ? ROW_ERRO_BUFFER_PEQUENO : ROW_OK;
 }
 
+/* Mensagem descritiva para um codigo de retorno. */
 const char *mensagem_status(RowStatus status)
 {
     switch (status) {
