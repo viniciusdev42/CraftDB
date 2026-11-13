@@ -1126,25 +1126,162 @@ O Executor é uma camada responsável pela execução de consultas `SELECT` util
 
 #### Row/Tuple
 
-Trata-se da representação lógica de uma linha (tupla) de uma tabela. Ela não conhece páginas,registros ou arquivos: ela só guarda valores como INT,CHAR ou NULL. A sua conversão para o formato físico (Registro {id,valor}) é feita por outra camada (módulo).
+É a representação lógica de uma linha (tupla) de uma tabela. Ela não conhece páginas,registros ou arquivos: ela só guarda valores como INT e CHAR. 
 
-A Row guarda um ponteiro para o esquema,o qual não deve ser alterado depois que uma row for criada. Cada nome de coluna é comparado sem diferenciar maiúsculas de minúsculas. Cada posição na coluna começa com 0.
+Ele acessa os valores através da posição e/ou do identificador da coluna. O nome não é diferenciado de maiúscula/minúscula. O tipo definido no catálogo é preservado: ler ou gravar uma coluna INT como CHAR retorna um erro.
+
+Ele é definido em duas `struct`: a primeira representa um campo,a qual contém o nome da coluna,o tipo de token,a quantidade de bytes da coluna,o valor do inteiro (se for INT) e o valor do texto (se for CHAR); a segunda representa a tupla em si,que contém a tabela a qual pertence,os campos da tupla e o número de campos.
+
+```C
+typedef struct {
+    char      nome[MAX_LEXEMA];     
+    TipoToken tipo;                 
+    int       tamanho;           
+    int32_t   inteiro;            
+    char      texto[TAM_CHAR + 1];
+} CampoRow;
+
+typedef struct {
+    char     tabela[MAX_LEXEMA];    
+    CampoRow campos[MAX_COLUNAS];
+    int      numero_campos;
+} Row;
+```  
+----
+
+Um Row cria uma linha vazia com o esquema da tabela no catálogo: cada campo recebe nome,tipo e tamanho da coluna;valores são iniciados em 0.
 
 ``` C
-typedef enum {
-  ROW_TIPO_INT = 0,
-  ROW_TIPO_CHAR =
-}TipoRow;
+int row_iniciar(Row *row, const TabelaCat *tabela) {
+    if (row == NULL || tabela == NULL) {
+        fprintf(stderr, "Erro: row_iniciar recebeu argumento NULL\n");
+        return -1;
+    }
 
-typedef struct {
-  char nome [MAX_NOME];
-  TipoRow tipo;
-  int tamanho;
-  int aceita_null;
-}ColunaRow;
+    memset(row, 0, sizeof(*row));
+    strcpy(row->tabela, tabela->nome);
+    row->numero_campos = tabela->numero_colunas;
 
-typedef struct {
- ColunaRow colunas [MAX_Colunas];
- int numero_colunas;
-}EsquemaRow;
-``` 
+    for (int i = 0; i < tabela->numero_colunas; i++) {
+        strcpy(row->campos[i].nome, tabela->colunas[i].nome);
+        row->campos[i].tipo    = tabela->colunas[i].tipo;
+        row->campos[i].tamanho = tabela->colunas[i].tamanho;
+    }
+    return 0;
+}
+```
+
+---
+
+Um Row resolve o nome da coluna **através da sua posição**,emitindo um erro se a coluna não existe.
+
+``` C
+static int row_resolve_nome(const Row *row, const char *nome) {
+    int pos = row_posicao_da_coluna(row, nome);
+    if (pos < 0) {
+        fprintf(stderr, "Erro: coluna '%s' nao existe na tabela '%s'\n",
+                nome != NULL ? nome : "(null)", row != NULL ? row->tabela : "?");
+    }
+    return pos;
+}
+```
+
+---
+
+Um Row define o valor **de acordo com o tipo** e retorna um erro caso o tipo seja diferente
+
+```C
+int row_definir_int(Row *row, int pos, int32_t valor) {
+    CampoRow *campo = row_campo_mutavel(row, pos);
+    if (campo == NULL) {
+        return -1;
+    }
+    if (campo->tipo != TOKEN_INT) {
+        fprintf(stderr, "Erro: a coluna '%s' da tabela '%s' e CHAR; nao aceita valor INT\n",
+                campo->nome, row->tabela);
+        return -1;
+    }
+    campo->inteiro = valor;
+    return 0;
+}
+```
+
+----
+
+Um Row lê o valor da coluna e retorna um erro **caso o tipo seja diferente**
+
+``` C
+const char *row_obter_char(const Row *row, int pos) {
+    const CampoRow *campo = row_campo(row, pos);
+    if (campo == NULL) {
+        return NULL;
+    }
+    if (campo->tipo != TOKEN_CHAR) {
+        fprintf(stderr, "Erro: a coluna '%s' da tabela '%s' e INT, nao CHAR\n",
+                campo->nome, row->tabela);
+        return NULL;
+    }
+    return campo->texto;
+}
+```
+
+----
+
+Um Row pode ser convertido para um registro de 8 bytes usado pela Árvore B+,seguindo as mesmas restrições do catálogo.
+
+```C
+int row_para_registro(const Row *row, Registro *reg) {
+    if (row == NULL || reg == NULL) {
+        fprintf(stderr, "Erro: row_para_registro recebeu argumento NULL\n");
+        return -1;
+    }
+    if (row->numero_campos < 1 || row->numero_campos > 2 || row->campos[0].tipo != TOKEN_INT) {
+        fprintf(stderr, "Erro: a Row da tabela '%s' nao e' compativel com o formato da arvore B+ "
+                        "(1a coluna INT e no maximo 2 colunas)\n", row->tabela);
+        return -1;
+    }
+
+    reg->id    = row->campos[0].inteiro;
+    reg->valor = 0;
+
+    if (row->numero_campos == 2) {
+        const CampoRow *campo = &row->campos[1];
+        if (campo->tipo == TOKEN_INT) {
+            reg->valor = campo->inteiro;
+        } else if (!empacotar_char(campo->texto, &reg->valor)) {
+            fprintf(stderr, "Erro: CHAR da coluna '%s' nao cabe no formato fisico de 4 bytes\n",
+                    campo->nome);
+            return -1;
+        }
+    }
+    return 0;
+}
+```
+----
+
+Um Row também pode ser montado a partir de um registro da Árvore B+.
+
+``` C
+int row_de_registro(Row *row, const TabelaCat *tabela, const Registro *reg) {
+    if (reg == NULL || row_iniciar(row, tabela) != 0) {
+        return -1;
+    }
+    if (tabela->numero_colunas < 1 || tabela->numero_colunas > 2 ||
+        tabela->colunas[0].tipo != TOKEN_INT) {
+        fprintf(stderr, "Erro: a tabela '%s' nao e' compativel com o formato da arvore B+\n",
+                tabela->nome);
+        return -1;
+    }
+
+    row->campos[0].inteiro = reg->id;
+
+    if (tabela->numero_colunas == 2) {
+        if (tabela->colunas[1].tipo == TOKEN_INT) {
+            row->campos[1].inteiro = reg->valor;
+        } else {
+            desempacotar_char(reg->valor, row->campos[1].texto);
+        }
+    }
+    return 0;
+}
+```

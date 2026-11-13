@@ -2,36 +2,22 @@
  *                 ROW (LINHA / TUPLA LOGICA)
  * ============================================================
  *
- * Uma Row e' a representacao LOGICA de uma linha de uma tabela: uma lista de
- * campos (nome, tipo, valor), na ordem das colunas definidas no Catalogo.
- * Ela NAO conhece bytes, paginas, offsets nem o formato fisico de 8 bytes do
- * Registro: esse conhecimento fica isolado nas duas funcoes de ponte
- * (row_de_registro / row_para_registro).
- *
- * Camadas utilizadas:
- *
- *   Catalog     -> define colunas e tipos (INT / CHAR) e o tamanho de cada coluna.
- *                  A Row copia esses metadados ao ser criada (row_iniciar), por
- *                  isso continua valida mesmo que o catalogo seja alterado/movido.
- *   BPlusTree   -> armazena os Registros fisicos (inserir_valor, buscar_valor,
- *                  percorrer_registros).
- *   Cache/Pager -> acessados indiretamente, via Catalog (selecionar_arquivo_tabela
- *                  reinicia o cache e troca o arquivo) e diretamente para
- *                  persistir (descarregar_todo_cache, sincronizar_dados).
+ * Uma Row é a representacao LÓGICA de uma linha de uma tabela,sendo uma lista de
+ * campos (nome, tipo, valor), na ordem das colunas definidas no Catálogo.
+ * 
+ *  Ela NÃO conhece bytes, páginas, offsets,nem o formato fisico de 8 bytes do registro:
+ *  esse conhecimento fica isolado nas duas funcões de ponte(row_de_registro / row_para_registro).
  *
  * Acesso aos valores:
- *   - por POSICAO da coluna (base 0):       row_obter_int(row, 0, &v)
- *   - por IDENTIFICADOR (nome da coluna):   row_obter_int_por_nome(row, "id", &v)
- *   Nomes nao diferenciam maiusculas/minusculas (mesma regra do Catalogo).
- *   O tipo definido no catalogo e' preservado: ler/gravar uma coluna INT como
- *   CHAR (ou vice-versa) e' rejeitado com erro.
+ *   - por POSICAO da coluna (base 0): row_obter_int(row, 0, &v)
+ *   - por IDENTIFICADOR (nome da coluna): row_obter_int_por_nome(row, "id", &v)
+ *   
+ *  Nomes não diferenciam maiúsculas/minúsculas (mesma regra do Catalogo).
+ *   
+ *  O tipo definido no catalogo e' preservado: ler/gravar uma coluna INT como
+ *  CHAR (ou vice-versa) e' rejeitado com erro.
  *
- * Convencao de retorno (igual ao Pager/Cache): 0 = sucesso, -1 = erro, com a
- * mensagem em stderr. Excecoes documentadas: row_buscar (0/1/-1, como
- * buscar_valor) e row_inserir (codigos INSERE_* da arvore B+).
- *
- * Observacao de compilacao: o Parser nao e' parte deste arquivo, mas o Catalog.c
- * depende dele (tipos Coluna, Comando, TipoToken, contexto_igual, nome_token...).
+ *  Convencão de retorno: 0 = sucesso, -1 = erro, com a  mensagem em stderr.
  */
 
 #ifndef ROW
@@ -464,15 +450,14 @@ void row_imprimir(const Row *row) {
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
-#ifndef ROW_SEM_MAIN
-
 static int imprime_linha_cb(const Row *row, void *arg) {
     (void)arg;
     printf("  ");
     row_imprimir(row);
     return 0;
 }
-
+#ifndef ROW_MAIN
+#define ROW_MAIN
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -541,6 +526,6 @@ int main(void) {
     return 0;
 }
 
-#endif /* ROW_SEM_MAIN */
+#endif /* ROW_MAIN */
 
 #endif /* ROW */
