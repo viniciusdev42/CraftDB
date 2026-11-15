@@ -1,4 +1,4 @@
-# Módulo 1
+****# Módulo 1
 
 ## Introdução
 
@@ -1285,3 +1285,12 @@ int row_de_registro(Row *row, const TabelaCat *tabela, const Registro *reg) {
     return 0;
 }
 ```
+
+---
+##### Observações
+
+1. O Row representa uma nova camada lógica entre o catálogo e o armazenamento:antes o CraftDB trabalhava direto com o registro físico de 8 bytes;com o Row é possível visualizar a coluna e a sua linha,em vez de um `int32_t` empacotado.
+
+2. O Row é a base para um executor:um operador de varredura devolve Rows e um filtro as avalia.Não é mais necessário repassar a tabela.
+
+3. A função mais complexa de Row é o `row_inserir`,ela precisa achar a tabela no catálogo,conferir se o esquema do Row corresponde ao do catálogo,converter o Row para registro (o que pode falhar se o CHAR não caber),trocar o arquivo e reiniciar o cache,inserir na B+ e distinguir duplicata de erro,descarregar o cache e sincronizar o disco (para que a inserção possa sobreviver ao fim do programa).
