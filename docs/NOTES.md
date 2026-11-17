@@ -1294,3 +1294,156 @@ int row_de_registro(Row *row, const TabelaCat *tabela, const Registro *reg) {
 2. O Row é a base para um executor:um operador de varredura devolve Rows e um filtro as avalia.Não é mais necessário repassar a tabela.
 
 3. A função mais complexa de Row é o `row_inserir`,ela precisa achar a tabela no catálogo,conferir se o esquema do Row corresponde ao do catálogo,converter o Row para registro (o que pode falhar se o CHAR não caber),trocar o arquivo e reiniciar o cache,inserir na B+ e distinguir duplicata de erro,descarregar o cache e sincronizar o disco (para que a inserção possa sobreviver ao fim do programa).
+
+----
+#### Query Validator
+
+É o componente que recebe a AST do Parser,confere a sua integridade estrutural,resolve a tabela no catálogo (e suas colunas),valida operadores e tipos,rejeita funcionalidades não suportadas e retorna uma consulta validada.
+
+Ele não altera o catálogo e não acessa o disco. Os registros e a criação das tabelas são responsabilidades do executor (camada superior). Esse módulo serve só pra validar e rejeitar consultas.
+
+Toda representação validada é representada por três `struct`:
+
+``` C
+typedef struct {
+    int       id_coluna;       
+    TipoToken tipo_coluna;      
+    int       tamanho;          
+    int       deslocamento; 
+    Valor     valor;
+} ValorValidado;
+```
+
+Representa uma estrutura que valida um INSERT dentro de uma determinada coluna
+
+---
+
+```C
+typedef struct {
+    int       id_coluna;
+    TipoToken tipo_coluna;
+    int       tamanho;
+    int       deslocamento;
+    TipoToken operacao;         
+    Valor     valor;
+} CondicaoValidada;
+```
+
+Representa uma estrutura que valida um WHERE dentro de uma determinada coluna
+
+---
+
+```C
+typedef struct {
+    int         valida;         
+    TipoComando tipo;
+    int         id_tabela;     
+    
+    const TabelaCat *tabela;    
+    
+    TabelaCat        nova_tabela;                   
+                                                                                       
+    ValorValidado    valores[MAX_COLUNAS];        
+    int              numero_valores;
+    CondicaoValidada condicoes[MAX_CONDICOES];    
+    int              numero_condicoes;
+} ConsultaValidada;
+```
+
+Representa uma estrutura que valida a query em si. Ela guarda o código de validação (`int valida`),o comando,o ID da tabela (no catálogo),a própria tabela,os valores validados (INSERT) e as condições validadas (WHERE).
+
+---
+
+A função principal do QueryValidator é `validar_consulta`,a qual valida um comando aceito pelo parser e não modifica o catálogo.
+
+```C
+static int validar_consulta(Validador *validador, Catalogo *cat,
+                            const Comando *comando, ConsultaValidada *saida)
+{
+    int ok = 0;
+
+    memset(saida, 0, sizeof *saida);
+    validador->mensagem[0] = '\0';
+
+    if (!validar_estrutura(validador, comando))
+        return 0;
+
+    saida->tipo = comando->tipo;
+
+    switch (comando->tipo) {
+        case CMD_CREATE: ok = validar_create(validador, cat, comando, saida); break;
+        case CMD_INSERT: ok = validar_insert(validador, cat, comando, saida); break;
+        case CMD_SELECT: ok = validar_select(validador, cat, comando, saida); break;
+    }
+
+    if (!ok) {
+        memset(saida, 0, sizeof *saida);   /* nada de resultado parcial */
+        return 0;
+    }
+    saida->valida = 1;
+    return 1;
+}
+``` 
+
+---
+
+A função `processar_script` verifica e valida cada comando. Se o comando for um CREATE,ele será registrado só como uma cópia na memória do catálogo,para que os comandos seguintes enxerguem a tabela.
+
+``` C
+static int processar_script(Catalogo *cat, const char *texto)
+{
+    Parser parser;
+    Validador validador;
+    int numero = 0, rejeitados = 0;
+
+    iniciar_parser(&parser, texto);
+
+    while (parser.atual.tipo != TOKEN_FIM) {
+        Comando          comando;
+        ConsultaValidada validada;
+
+        numero++;
+
+        if (!parse_comando(&parser, &comando)) {
+            printf("[%d] REJEITADO (sintaxe): %s\n", numero, parser.mensagem);
+            rejeitados++;
+            sincronizar(&parser);
+            continue;
+        }
+
+        if (!validar_consulta(&validador, cat, &comando, &validada)) {
+            printf("[%d] REJEITADO (semantica): %s\n", numero, validador.mensagem);
+            rejeitados++;
+            continue;
+        }
+
+        printf("[%d] OK\n", numero);
+        imprimir_consulta_validada(&validada);
+
+        if (validada.tipo == CMD_CREATE)
+            cat->tabelas[cat->numero_tabelas++] = validada.nova_tabela;
+    }
+
+    printf("\n%d comando(s), %d rejeitado(s).\n", numero, rejeitados);
+    return rejeitados;
+}
+``` 
+
+----
+
+##### Observações
+
+1. O parser só garante que a sintaxe está correta enquanto que o catálogo valida de forma espalhada.Com o validador,o executor (em construção) passa a receber só as consultas já conferidas,como tabela existente,colunas resolvidas,tipos compatíveis e literais que cabem em registros de 8 bytes.Isso pode reduzir o risco de gravar lixo de memória na árvore B+ ou de fazer uma leitura fora dos limites.
+
+2. `ConsultaValidada` traz `id_tabela,id_coluna`,tipo,tamanho e deslocamento.Logo,o executor não precisa buscar tabelas e colunas pelo nome.
+
+3. O pipeline de execução fica `Tokenizer->Parser ->QueryValidator` e cada etapa possuí uma responsabilidade,separando erros de semântica e sintaxe.
+
+4. Se qualquer parte da consulta for inválida,a saída é zerada e nada é executado,o que garante **atomicidade**.
+
+5. Enquanto o executor não consumir `ConsultaValidada`,a mesma verificação é feita duas vezes.
+
+6. A validação só vale para o estado do catálogo no momento em que ocorre:se outro comando alterar o catálogo entre `validar` e `executar`,o resultado pode ficar **defasado**.
+
+7. O catálogo inteiro precisa ser copiado para que possa ser validado.
+
