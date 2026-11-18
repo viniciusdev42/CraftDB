@@ -1447,3 +1447,146 @@ static int processar_script(Catalogo *cat, const char *texto)
 
 7. O catálogo inteiro precisa ser copiado para que possa ser validado.
 
+---
+
+#### Table Scan
+
+É um operador de **varredura sequencial**. Ele pecorre todos os registros armazenados e entrega tuplas lógicas (Row) uma por uma,seguindo o modelo iterador.O Table Scan do CraftDB não implementa WHERE:toda tupla que for válida será entregue.
+
+O Table Scan utiliza os módulos anteriores da seguinte forma:
+
+1. Catálogo:é usado para **localizar a tabela pelo nome**.
+
+2. BPlusTree:é usada para **armazenar metadados**.A página 0 guarda a raiz,os dados ficam nas folhas.O scan desce da raiz até as folhas da esquerda e segue a cadeia de folhas.
+
+3. Cache:é usado para **fixar** e **soltar** páginas.Como a varredura é somente de leitura,as páginas **não são** marcadas como sujas.A varredura mantém só um pin na folha corrente,sendo liberado ao chegar no fim,em caso de erro,ou quando a operação de scan é finalizada.O cache não pode ser reiniciado enquanto a varredura estiver sendo feita no meio de uma folha,pois ele recusa páginas fixadas.
+
+4. Pager:é usado para **alocação** e **desserialização** de registros.
+
+5. Row:é usado para **montar** a tupla lógica a partir de um registro físico.
+
+----
+
+A `struct` do `TableScan` é composta por:metadados de uma tabela pertecente ao catálogo;um valor para informar se a operação está em andamento(`aberta`) e outro para informar se ela foi finalizada(`terminada`);também há um valor para informar a próxima folha a ser aberta,outro para informar o número de folhas abertas e um que informa a folha fixada;também há um inteiro que informa se há um pin ativo;o buffer de dados da página,o próximo slot e o número de chaves da folha(`slots_ocupados) compõem os últimos campos.
+
+``` C
+typedef struct {
+    const TabelaCat *tabela;       
+    int              aberta;       
+    int              terminada;   
+
+    int              proxima_folha; 
+    int              folhas_abertas;
+    int              pagina_atual;  
+    int              fixada;       
+    unsigned char   *dados;         
+    int              proximo_slot; 
+    int              slots_ocupados;
+} TableScan;
+```
+
+---
+
+O Table Scan consulta o catálogo,aponta o sistema de páginas para o arquivo da tabela,lê a raiz nos metadados e localiza a primeira folha.
+
+``` C
+int table_scan_abrir(TableScan *scan, Catalogo *cat, const char *nome_tabela) {
+    if (scan == NULL || cat == NULL || nome_tabela == NULL) {
+        fprintf(stderr, "Erro: table_scan_abrir recebeu argumento NULL\n");
+        return -1;
+    }
+    memset(scan, 0, sizeof(*scan));
+    scan->proxima_folha = SEM_PAGINA;
+
+    const TabelaCat *tabela = catalogo_buscar_tabela(cat, nome_tabela);
+    if (tabela == NULL) {
+        fprintf(stderr, "Erro: tabela '%s' nao existe no catalogo\n", nome_tabela);
+        return -1;
+    }
+    if (!selecionar_arquivo_tabela(cat, tabela)) {
+        fprintf(stderr, "Erro: %s\n", cat->mensagem);
+        return -1;
+    }
+
+    int primeira;
+    if (table_scan_localizar_primeira_folha(tabela, &primeira) != 0) {
+        return -1;
+    }
+
+    scan->tabela        = tabela;
+    scan->proxima_folha = primeira;
+    scan->aberta        = 1;
+    return 0;
+}
+```
+
+Enquanto Table Scan continuar operando,o catálogo não pode ser movido.Além disso,nenhuma página é fixada até a primeira chamada `next()`.
+
+---
+
+```C
+int table_scan_next(TableScan *scan, Row *saida) {
+    if (scan == NULL || saida == NULL) {
+        fprintf(stderr, "Erro: table_scan_next recebeu argumento NULL\n");
+        return -1;
+    }
+    if (!scan->aberta) {
+        fprintf(stderr, "Erro: table_scan_next chamado em varredura nao aberta\n");
+        return -1;
+    }
+
+    while (!scan->terminada) {
+        /* 1) Sem folha corrente: abre a proxima da cadeia */
+        if (!scan->fixada) {
+            int r = table_scan_abrir_proxima_pagina(scan);
+            if (r < 0) {
+                return table_scan_falhar(scan);
+            }
+            if (r == 0) {
+                scan->terminada = 1; /* cadeia acabou: fim real */
+                break;
+            }
+        }
+
+        /* 2) Percorre os slots da folha corrente */
+        while (scan->proximo_slot < MAX_CHAVES) {
+            int slot = scan->proximo_slot++;
+
+            if (!slot_esta_ocupado(slot, scan->slots_ocupados)) {
+                continue; /* slot livre: ignorado */
+            }
+
+            /* 3) Reconstroi a tupla: bytes -> Registro -> Row */
+            Registro reg;
+            desserializar_registro(scan->dados + OFFSET_REGISTROS + (size_t)slot * TAMANHO_REGISTRO,
+                                   &reg);
+            if (row_de_registro(saida, scan->tabela, &reg) != 0) {
+                return table_scan_falhar(scan);
+            }
+            return 1;
+        }
+
+        /* 4) Slots esgotados: libera o pin e passa para a proxima folha */
+        if (table_scan_liberar_pagina(scan) != 0) {
+            return table_scan_falhar(scan);
+        }
+    }
+
+    return 0; /* fim da varredura */
+}
+``` 
+----
+
+Após a varredura,todos os pins (que estiverem ativos) são liberados por segurança.
+
+```C
+nt table_scan_fechar(TableScan *scan) {
+    if (scan == NULL) {
+        return -1;
+    }
+    int status = table_scan_liberar_pagina(scan);
+    scan->aberta = 0;
+    scan->terminada = 1;
+    return status;
+}
+```
