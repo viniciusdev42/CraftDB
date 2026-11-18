@@ -394,7 +394,8 @@ static void imprimir_consulta_validada(const ConsultaValidada *q)
 /* Bloco main (simulacao: valida, mas nunca executa nem grava)         */
 /* ------------------------------------------------------------------ */
 
-#ifndef VALIDADOR_SEM_MAIN
+#ifndef VALIDATOR_MAIN
+#define VALIDATOR_MAIN
 
 static const char EXEMPLO[] =
     "CREATE TABLE alunos (id INT, nome CHAR);\n"
@@ -508,4 +509,4 @@ int main(int argc, char **argv)
     return rejeitados ? 1 : 0;
 }
 
-#endif /* VALIDADOR_SEM_MAIN */
+#endif /* VALIDATOR_MAIN */
