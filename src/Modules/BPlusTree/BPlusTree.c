@@ -33,8 +33,8 @@
 #ifndef B_PLUS_TREE
 #define B_PLUS_TREE
 
-#include "Pager.c"
-#include "Cache.c"
+#include "../Storage/Pager.c"
+#include "../Storage/Cache.c"
 
 #define MAX_CHAVES   3
 #define NO_INTERNO   0

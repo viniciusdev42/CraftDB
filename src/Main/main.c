@@ -1,11 +1,11 @@
 #ifndef DB_CRAFT_MAIN
 #define DB_CRAFT_MAIN
 
-#include "Pager.c"
-#include "Cache.c"
-#include "BPlusTree.c"
-#include "Tokenizer.c"
-#include "Parser.c"
+#include "../Modules/Storage/Pager.c"
+#include "../Modules/Storage/Cache.c"
+#include "../Modules/BPlusTree/BPlusTree.c"
+#include "../Modules/Parser/Tokenizer.c"
+#include "../Modules/Parser/Parser.c"
 
 int main(void) {
 
@@ -16,7 +16,7 @@ int main(void) {
 
     /* Garante que as paginas 0, 1 e 2 existam antes de usar a pagina 2 */
     while (total_paginas_alocadas() <= pagina_alvo) {
-        if (aloca_pagina() < 0) {
+        if (alocar_pagina() < 0) {
             fprintf(stderr, "Erro Ao Alocar Paginas Necessarias.\n");
             return 1;
         }
@@ -39,12 +39,12 @@ int main(void) {
     memcpy(buffer + offset_na_pagina, registro, TAMANHO_REGISTRO);
 
     /* Grava a página de volta no arquivo (já sincroniza com o disco) */
-    if (escreve_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
+    if (escrever_pagina(pagina_alvo, buffer, sizeof(buffer)) != 0) {
         return 1;
     }
 
     /* Sincronização explícita adicional, garantindo persistência total */
-    sincroniza_dados();
+    sincronizar_dados();
 
     /* Calcula o byte absoluto no arquivo onde o registro foi gravado */
     long byte_absoluto = (long)pagina_alvo * TAMANHO_PAGINA + offset_na_pagina;
@@ -57,7 +57,7 @@ int main(void) {
     
     unsigned char registro_bytes[TAMANHO_REGISTRO];
     
-    serializa_registro(&registro_bruto,registro_bytes);
+    serializar_registro(&registro_bruto,registro_bytes);
 
     unsigned char pagina_lida[TAMANHO_PAGINA];
     
@@ -65,7 +65,7 @@ int main(void) {
     
     ler_pagina(pagina_alvo, pagina_lida, sizeof(pagina_lida));
     
-    desserializa_registro(pagina_lida + offset_na_pagina, &registro_lido);
+    desserializar_registro(pagina_lida + offset_na_pagina, &registro_lido);
     
     printf("Registro Relido Do Disco e Desserializado: ID=%d, Valor=%d\n",
            registro_lido.id, registro_lido.valor);
@@ -75,19 +75,19 @@ int main(void) {
 
     /* Garante paginas suficientes para forcar expulsao (mais paginas que frames) */
     while (total_paginas_alocadas() < NUM_FRAMES + 2) {
-        if (aloca_pagina() < 0) {
+        if (alocar_pagina() < 0) {
             fprintf(stderr, "Erro Ao Alocar Paginas Extras Para O Teste Do Cache.\n");
             return 1;
         }
     }
 
     /* fixa(2): primeira vez -> falta (miss) */
-    unsigned char *buf2 = fixa(pagina_alvo);
+    unsigned char *buf2 = fixar(pagina_alvo);
     if (buf2 == NULL) return 1;
 
     Registro lido_via_cache;
     
-    desserializa_registro(buf2 + offset_na_pagina, &lido_via_cache);
+    desserializar_registro(buf2 + offset_na_pagina, &lido_via_cache);
     
     printf("[CACHE] Pagina %d Fixada -> ID=%d, Valor=%d\n",
            pagina_alvo, lido_via_cache.id, lido_via_cache.valor);
@@ -98,28 +98,28 @@ int main(void) {
     
     unsigned char atualizado_bytes[TAMANHO_REGISTRO];
     
-    serializa_registro(&atualizado, atualizado_bytes);
+    serializar_registro(&atualizado, atualizado_bytes);
     
     memcpy(buf2 + offset_na_pagina, atualizado_bytes, TAMANHO_REGISTRO);
 
-    solta(pagina_alvo, 1); /* solta marcando suja; NO-FORCE: nao grava ainda */
+    soltar(pagina_alvo, 1); /* solta marcando suja; NO-FORCE: nao grava ainda */
 
     /* fixa(2) novamente: deve ser acerto (hit) e devolver a MESMA referencia */
-    unsigned char *buf2_de_novo = fixa(pagina_alvo);
+    unsigned char *buf2_de_novo = fixar(pagina_alvo);
     
     printf("[CACHE] Segunda Fixacao Da Pagina %d -> Mesma Referencia? %s\n",
            pagina_alvo, (buf2 == buf2_de_novo) ? "Sim" : "Nao");
     
-           solta(pagina_alvo, 0);
+           soltar(pagina_alvo, 0);
 
     /* Fixa e solta outras paginas para exceder a capacidade do cache e forcar
     expulsoes via LRU, exercitando a politica STEAL sobre a pagina suja acima */
     
     for (int p = 0; p < NUM_FRAMES + 2; p++) {
         if (p == pagina_alvo) continue;
-        unsigned char *bp = fixa(p);
+        unsigned char *bp = fixar(p);
         if (bp != NULL) {
-            solta(p, 0);
+            soltar(p, 0);
         }
     }
 
@@ -132,7 +132,7 @@ int main(void) {
     
     Registro verificado;
     
-    desserializa_registro(pagina_verificacao + offset_na_pagina, &verificado);
+    desserializar_registro(pagina_verificacao + offset_na_pagina, &verificado);
     
     printf("[CACHE] Apos Possivel Expulsao, Disco Contem ID=%d, Valor=%d (Esperado ID=99, Valor=12345)\n",
            verificado.id, verificado.valor);
@@ -140,7 +140,7 @@ int main(void) {
     /* descarrega() explicito: garante que qualquer pagina ainda suja no cache
        seja persistida (uso tipico ao final do programa) */
     for (int p = 0; p < total_paginas_alocadas(); p++) {
-        descarrega(p);
+        descarregar(p);
     }
     
     printf("\n ---- Arvore B+ -----\n");
@@ -212,10 +212,10 @@ int main(void) {
     /* Persiste todas as paginas ainda sujas no cache (NO-FORCE) */
 
     for (int p = 0; p < total_paginas_alocadas(); p++) {
-        descarrega(p);
+        descarregar(p);
     }
 
-    sincroniza_dados();
+    sincronizar_dados();
     
     printf("\n ----- TOKENIZADOR ---- \n\n");
     
