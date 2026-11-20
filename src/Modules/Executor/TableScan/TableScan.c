@@ -57,10 +57,11 @@
 #define TABLE_SCAN
 
 /* Row.c ja inclui Pager.c, Cache.c, BPlusTree.c e Catalog.c (que traz o Parser).
-   O main de Row.c não deve interferir com o main de TableScan.c*/
-#define main ROW_MAIN
+   ROW_SEM_MAIN desliga o main de demonstracao de Row.c, para nao colidir com o
+   main deste arquivo. */
+#define ROW_SEM_MAIN
 #include "Row.c"
-#undef main
+#undef ROW_SEM_MAIN
 /* Offsets do cabecalho da folha (espelham serializar_no/desserializar_no) */
 #define SCAN_OFFSET_TIPO            0
 #define SCAN_OFFSET_NUM_REGISTROS   4
@@ -319,7 +320,7 @@ static int coletar_id_cb(const Row *row, void *arg) {
     return 0;
 }
 
-#ifndef TABLE_SCAN_MAIN
+#ifndef TABLE_SCAN_SEM_MAIN
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -420,6 +421,6 @@ int main(void) {
     return 0;
 }
 
-#endif /* TABLE_SCAN_MAIN */
+#endif /* TABLE_SCAN_SEM_MAIN */
 
 #endif /* TABLE_SCAN */

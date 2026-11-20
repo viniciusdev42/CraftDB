@@ -456,8 +456,7 @@ static int imprime_linha_cb(const Row *row, void *arg) {
     row_imprimir(row);
     return 0;
 }
-#ifndef ROW_MAIN
-#define ROW_MAIN
+#ifndef ROW_SEM_MAIN
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -526,6 +525,6 @@ int main(void) {
     return 0;
 }
 
-#endif /* ROW_MAIN */
+#endif /* ROW_SEM_MAIN */
 
 #endif /* ROW */
