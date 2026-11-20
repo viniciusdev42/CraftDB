@@ -23,11 +23,10 @@
 #ifndef ROW
 #define ROW
 
-#include "Pager.c"
-#include "Cache.c"
-#include "BPlusTree.c"
-#include "Catalog.c"
-
+#include "../../Storage/Pager.c"
+#include "../../Storage/Cache.c"
+#include "../../BPlusTree/BPlusTree.c"
+#include "../../Catalog/Catalog.c"
 /* ------------------------------------------------------------------ */
 /* Estruturas                                                          */
 /* ------------------------------------------------------------------ */

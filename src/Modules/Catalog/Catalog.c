@@ -40,11 +40,10 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
-#include "Pager.c"
-#include "Cache.c"
-#include "BPlusTree.c"
-#include "Parser.c"
-
+#include "../Storage/Pager.c"
+#include "../Storage/Cache.c"
+#include "../BPlusTree/BPlusTree.c"
+#include "../Parser/Parser.c"
 /* ------------------------------------------------------------------ */
 /* Constantes                                                          */
 /* ------------------------------------------------------------------ */

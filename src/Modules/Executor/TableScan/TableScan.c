@@ -60,7 +60,7 @@
    ROW_SEM_MAIN desliga o main de demonstracao de Row.c, para nao colidir com o
    main deste arquivo. */
 #define ROW_SEM_MAIN
-#include "Row.c"
+#include "../Row/Row.c"
 #undef ROW_SEM_MAIN
 /* Offsets do cabecalho da folha (espelham serializar_no/desserializar_no) */
 #define SCAN_OFFSET_TIPO            0

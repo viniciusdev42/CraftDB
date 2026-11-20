@@ -39,8 +39,7 @@
  *   ./validador script.sql meu.cat   parte do catalogo gravado em meu.cat
  */
 
-#include "Catalog.c"
-
+#include "../../Catalog/Catalog.c"
 /* ------------------------------------------------------------------ */
 /* Representacao validada                                              */
 /* ------------------------------------------------------------------ */
