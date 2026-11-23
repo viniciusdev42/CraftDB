@@ -2,7 +2,7 @@
 
 ## Introdução
 
-O Módulo 1 se trata de um **Sistema de Armazenamento em Páginas**,o qual é responsável por alocar os bytes para unidades chamadas de Páginas,as quais são usadas pelos módulos superiores (`Parser,Catálogo,Executor`) para realizarem operações mais abstratas.
+O Módulo 1 se trata de um **sistema de armazenamento em páginas**,o qual é responsável por alocar os bytes para unidades chamadas de páginas,as quais são usadas pelos módulos superiores (parser,catálogo,executor) para realizarem operações mais abstratas.
 
 O Módulo 1 inicialmente se tratava apenas páginas de 4KB,cabeçalhos de 16B e registros de 8B,possuindo somente funções de `ler_pagina()` e `escrever_pagina()`.No entanto,à medida em que requisitos como Persistência e Isolamento foram sendo solicitados,a complexidade do módulo tornou-se cada vez maior.
 
@@ -246,14 +246,14 @@ O valor `00002000` representa **8192** em hexadecimal,sendo o começo da página
 
 ## Suíte de Testes
 
-Encontra-se no diretório `test/Pager`.
+Encontra-se em `test/page`.
 
-Nele há um arquivo `PagerTest.c`,o qual depende de `Pager.c`. 
+Nele há um arquivo `page_test.c`,o qual depende de `page.c`. 
 
-Para executar o `PagerTest.c`,coloque-o junto de `Pager.c` em um diretório separado.Para compilar e executar os arquivos,rode o seguinte comando:
+Para executar o `page_test.c`,coloque-o junto de `page.c` em um diretório separado.Para compilar e executar os arquivos,rode o seguinte comando:
 
 ``` Shell
-gcc PagerTest.c -o PagerTest 
+gcc page_test.c -o page_test 
 ```
 
 Cada funcionalidade ganhou uma função de teste dedicada (alocação, validação, leitura/escrita, isolamento, serialização, sincronização, persistência), usando uma pequena infraestrutura própria (`verifica`/`VERIFICA`) que registra sucesso ou falha sem interromper a execução dos demais testes.
@@ -272,13 +272,13 @@ Essa progressão espelha, em miniatura, como sistemas de armazenamento reais evo
 
 ## Introdução
 
-O Módulo 2 implementa Cache seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
+O Módulo 2 implementa um cache seguindo as políticas **STEAL** e **NO-FORCE**.A sua principal função é acelerar as leituras realizadas pelo CraftDB aos frames das páginas do Módulo 1.
 
 Inicialmente,o Módulo 2 só implementou a estrutura de frames e cache de páginas adotando as políticas STEAL e NO-FORCE.
 
 Durante o desenvolvimento do Módulo foram definidos 4 frames,a fim de validar a função `_expulsa()`.
 
-A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir que o Cache possa gravar as páginas sujas no disco antes de um `COMMIT`,o qual pode gravá-las **posteriormente**. 
+A decisão de seguir as políticas STEAL e NO-FORCE foi tomada a fim de garantir que o cache possa gravar as páginas sujas no disco antes de um `COMMIT`,o qual pode gravá-las **posteriormente**. 
 
 Além disso,o CraftDB implementará `Logs` no Módulo 6.
 
@@ -296,7 +296,7 @@ O Módulo 2 adota três políticas:
 
 Isso permite que o Módulo controle o número de fixações de cada página,o estado de sujeira,a quantidade de acertos e erros de cache e o momento lógico do seu último uso.
 
-O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `Cache.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
+O Módulo implementa um `Buffer Pool` com capacidade configurável em tempo de compilação.O arquivo `cache.c` implementou uma capacidade de 4 frames a fim de testar a política LRU.
 
 ### Frames
 
@@ -327,7 +327,7 @@ typedef struct {
 } CachePaginas;
 ```
 
-É a estrutura do Cache.
+É a estrutura do cache.
 
 Ela armazena um array de frames disponíveis para armazenar páginas,a quantidade máxima de páginas que podem permanecer residentes,a quantidade atual de frames ocupados,a quantidade de acertos e erros,e o contador lógico usado pelo LRU.
 
@@ -409,7 +409,7 @@ unsigned char *fixa(int n) {
 }
 ```
 
-Fixa a página `n` no Cache e retorna um ponteiro para o seu buffer de 4KB.
+Fixa a página `n` no cache e retorna um ponteiro para o seu buffer de 4KB.
 
 Caso a página esteja em algum frame,o contador de fixações é incrementado e a mesma referência é retornada a essa página,em vez de uma cópia nova.
 
@@ -494,21 +494,21 @@ Uma página fixada não pode ser processada por essa função devido ao bloco `i
 
 ## Suíte de Testes
 
-Localiza-se no diretório `Cache` de `tests`.Nela,temos três arquivos de teste:
+Localiza-se em tests/cache`.Nela,temos três arquivos de teste:
 
-O `CacheTest1.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
+O `cache_test1.c` testa a capacidade do cache com 4 frames,verificando se múltiplas leituras de uma mesma página resultam em uma única leitura fixa no disco.Nele,a primeira leitura deve resultar em um cache miss e disparar exatamente uma leitura no disco,com as seguintes leituras resultando em cache hits,sem tocar o disco e devolvendo sempre a mesma referência.
 
-O `CacheTest2.c` testa o cache com a capacidade reduzida de 3 frames.Ele verifica se ao tocar 4 páginas distintas com um cache de apenas 3 frames,a página que for expulsa será exatamente a usada menos recentemente (LRU),em vez da primeira que entrou (FIFO).
+O `cache_test2.c` testa o cache com a capacidade reduzida de 3 frames.Ele verifica se ao tocar 4 páginas distintas com um cache de apenas 3 frames,a página que for expulsa será exatamente a usada menos recentemente (LRU),em vez da primeira que entrou (FIFO).
 
-O `CacheTest3.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
+O `cache_test3.c` verifica que uma alteração realizada em uma página após esta ter sido expulsa permanece persistida quando o banco é reaberto em outro processo do sistema operacional.O seu binário possuí dois modos e deve ser executado duas vezes,como dois processos distintos:processo A,que cria o banco,altera uma página,força sua expulsão do cache e encerra;processo B,que abre o mesmo arquivo de banco do zero e confirma que a alteração realizada pelo processo A está lá.
 
-Para executá-los,junte-os ao arquivo `Cache.c` em um diretório separado e execute o script `CacheTest.sh`.
+Para executá-los,junte-os ao arquivo `cache.c` em um diretório separado e execute o script `cache_test.sh`.
 
-O `CacheTest.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux.Para executá-lo rode o seguinte comando: ` bash CacheTest.sh`.
+O `CacheTest.sh` é um arquivo de Shell Script que só pode ser executado em ambientes Linux.Para executá-lo rode o seguinte comando: ` bash cache_test.sh`.
 
 ## Conclusões
 
-O Cache é uma importante etapa no desenvolvimento de um SGBD,pois ele permite que bancos de dados possam acessar arquivos com muito mais eficiência.Ao desenvolver esse módulo foi necessário seguir as políticas STEAL e NO-FORCE,além do LRU.Se não fosse por essas especificações o banco poderia gravar em disco páginas sujas de transações que ainda não realizaram o COMMIT (STEAL) ou não ser capaz de gravar as páginas alteradas por uma transação em um COMMIT (NO-FORCE).Além disso,em caso de cache cheio,usar FIFO em vez de LRU significaria que um cache hit não alteraria a fila,ao contrário do LRU onde cada cache hit devolveria a página para o fim da fila.
+O cache é uma importante etapa no desenvolvimento de um SGBD,pois ele permite que bancos de dados possam acessar arquivos com muito mais eficiência.Ao desenvolver esse módulo foi necessário seguir as políticas STEAL e NO-FORCE,além do LRU.Se não fosse por essas especificações o banco poderia gravar em disco páginas sujas de transações que ainda não realizaram o COMMIT (STEAL) ou não ser capaz de gravar as páginas alteradas por uma transação em um COMMIT (NO-FORCE).Além disso,em caso de cache cheio,usar FIFO em vez de LRU significaria que um cache hit não alteraria a fila,ao contrário do LRU onde cada cache hit devolveria a página para o fim da fila.
 
 # Módulo 3
 
@@ -737,7 +737,7 @@ int dividir_interno(int pagina, No *no, int32_t *chave_promovida, int *nova_pagi
 
 ## Suite de Testes
 
-Encontra-se no diretório `tests/BPlusTree`. Ele inclui o arquivo `BPlusTest.c`,o qual depende de `BPlusTree.c`. Para que o arquivo seja executado,é preciso juntá-lo ao arquivo da B+ em um diretório separado.
+Encontra-se no diretório `tests/index`. Ele inclui o arquivo `b_plus_test.c`,o qual depende de `b_plus_tree.c`. Para que o arquivo seja executado,é preciso juntá-lo ao arquivo da B+ em um diretório separado.
 
 Os testes são executados dentro de um diretório **temporário**,logo o `craft-db.dat` não é tocado.
 
@@ -759,10 +759,10 @@ A auditoria pecorre a árvore inteira a partir de sua raiz.Ela verifica:
 
 8. Se nenhuma página foi "vazada": total = 1 (meta) + folhas + internos
 
-Para executar o `BPlusTest.c` rode o seguinte comando:
+Para executar o `b_plus_test.c` rode o seguinte comando:
 
 ``` Shell
-gcc BPlusTest.c -o BPlusTest
+gcc b_plus_test.c -o b_plus_test
 ```
 
 ## Conclusões
@@ -790,13 +790,13 @@ Para que seja um índice completo são necessárias as seguintes funcionalidades
 
 O Módulo 4 se trata de um conjunto de arquivos responsáveis por receber comandos SQL e convertê-los em instruções para o CraftDB.
 
-Em bancos de dados relacionais,o processamento de uma consulta passa por diversas etapas até encontrar os dados no disco. Os componentes **Tokenizador,Parser e Catálogo** são responsáveis por atuar nesse pipeline.
+Em bancos de dados relacionais,o processamento de uma consulta passa por diversas etapas até encontrar os dados no disco. Os componentes tokenizador,parser e catálogo são responsáveis por atuar nesse pipeline.
 
 ## Visão Geral
 
 ### Tokenizador
 
-O Tokenizador é o componente que recebe um texto SQL e o converte em uma sequência de **tokens**. Ele ignora espaços em brancos,quebras de linhas e comentários,transformando um texto contínuo em uma sequência estruturada de palavra-chave,identificadores,operadores e literais.
+O tokenizador é o componente que recebe um texto SQL e o converte em uma sequência de **tokens**. Ele ignora espaços em brancos,quebras de linhas e comentários,transformando um texto contínuo em uma sequência estruturada de palavra-chave,identificadores,operadores e literais.
 
 ``` SQL
 CREATE TABLE alunos (id INT, nome CHAR);
@@ -806,7 +806,7 @@ SELECT * FROM alunos WHERE id >= 1 AND nome <> 'Bia';
 
 Os tokens upper-case são palavras-chaves. Os tokens lower-case são identificadores. Os tokens `>`,`<` e  `=` são operadores. O token `1` é um literal numérico. O token `;` é um delimitador.
 
-Em `Tokenizer.c` os tokens estão em um `enum` chamado `TipoToken`,o qual lista todas as categorias de tokens.
+Em `tokenizer.c` os tokens estão em um `enum` chamado `TipoToken`,o qual lista todas as categorias de tokens.
 
 ``` C
 typedef enum {
@@ -864,7 +864,7 @@ typedef struct {
 } Token;
 ``` 
 
-O Tokenizador também é representado por uma `struct`,que guarda o texto de entrada e a posição atual.
+O tokenizador também é representado por uma `struct`,que guarda o texto de entrada e a posição atual.
 
 ``` C
 typedef struct {
@@ -875,7 +875,7 @@ typedef struct {
 } Tokenizador;
 ```
 
-Os tokens são devolvidos exatamente na ordem em que aparecem no texto,cada um com uma linha e coluna de origem. Isso é feito porque no SQL a ordem muda o significado. Um comando `INSERT INTO ... VALUES` não é o mesmo que `VALUES ... INSERT INTO`. Sendo assim,o tokenizador garante que a sequência de saída seja fiél a sequência de entrada,pois o Parser deve validá-la depois.
+Os tokens são devolvidos exatamente na ordem em que aparecem no texto,cada um com uma linha e coluna de origem. Isso é feito porque no SQL a ordem muda o significado. Um comando `INSERT INTO ... VALUES` não é o mesmo que `VALUES ... INSERT INTO`. Sendo assim,o tokenizador garante que a sequência de saída seja fiél a sequência de entrada,pois o parser deve validá-la depois.
 
 Cada palavra reservada é representada por uma `struct`,que armazena a palavra e o tipo de token. As palavras reservadas são `CREATE,INSERT,INSERT,SELECT,FROM,WHERE,AND,INT e CHAR`.
 
@@ -911,7 +911,7 @@ static const Reservada RESERVADAS[] = {
 
 As palavras reservadas possuem prioridade sobre os identificadores. O código consulta primeiro a tabela `RESERVADAS` e caso a palavra não esteja lá,ela é classificada como um `TOKEN_NAO_SUPORTADO`.
 
-O Tokenizador é responsável por devolver o próximo token que aparece na ordem do texto. Isso é feito por meio da função `proximo_token()`.
+O tokenizador é responsável por devolver o próximo token que aparece na ordem do texto. Isso é feito por meio da função `proximo_token()`.
 
 ``` C
 Token proximo_token(Tokenizador *t)
@@ -1027,11 +1027,11 @@ Token proximo_token(Tokenizador *t)
 
 ### Parser
 
-O Parser recebe a sequência de tokens gerada pelo Tokenizador e verifica se a estrutura da consulta faz sentido de acordo com as regras da linguagem SQL.
+O parser recebe a sequência de tokens gerada pelo tokenizador e verifica se a estrutura da consulta faz sentido de acordo com as regras da linguagem SQL.
 
-Ele valida a gramática por meio da **Análise Sintática**. Se você escrever um comando errado,como `FROM usuarios SELECT nome`,o Parser verifica a ordem dos tokens e invalida a consulta imediatamente por ela violar as regras de sintaxe do SQL.
+Ele valida a gramática por meio da **Análise Sintática**. Se você escrever um comando errado,como `FROM usuarios SELECT nome`,o parser verifica a ordem dos tokens e invalida a consulta imediatamente por ela violar as regras de sintaxe do SQL.
 
-Caso a sintaxe esteja correta,o Parser constrói uma árvore hierárquica chamada **Árvore Sintática Abstrata**,a qual representa a lógica da operação de forma estruturada para o banco de dados.
+Caso a sintaxe esteja correta,o parser constrói uma árvore hierárquica chamada **Árvore Sintática Abstrata**,a qual representa a lógica da operação de forma estruturada para o banco de dados.
 
 ``` C
 /*
@@ -1080,7 +1080,7 @@ typedef struct {
 
 ### Catálogo
 
-O Catálogo ou Dicionário de Dados é o repositório interno do banco de dados. Ele armazena os metadados do CraftDB,como tabelas,colunas,tipos de dados,tamanho e  posição (offset) de cada coluna dentro dos registros.
+O catálogo,ou o dicionário de dados,é o repositório interno do banco de dados. Ele armazena os metadados do CraftDB,como tabelas,colunas,tipos de dados,tamanho e  posição (offset) de cada coluna dentro dos registros.
 
 ``` C
 typedef struct {
@@ -1112,7 +1112,7 @@ typedef struct {
 | `INSERT` | Confere tabela, quantidade de valores e tipo de cada valor |
 | `SELECT` | Confere tabela, colunas do `WHERE` e tipo dos literais |
 
-O Catálogo é uma camada separada do Parser. A validação semântica é responsabilidade do catálogo,enquanto que a análise sintática é responsabilidade do parser. Dessa forma,o catálogo recebe ASTs corretas.
+O catálogo é uma camada separada do parser. A validação semântica é responsabilidade do catálogo,enquanto que a análise sintática é responsabilidade do parser. Dessa forma,o catálogo recebe ASTs corretas.
 
 ---
 
@@ -1120,11 +1120,11 @@ O Catálogo é uma camada separada do Parser. A validação semântica é respon
 
 ## Introdução
 
-O Executor é uma camada responsável pela execução de consultas `SELECT` utilizando a filtragem `WHERE`,reutilizando os módulos já implementados. O seu objetivo é transformar uma representação produzida pelo `Parser` em operações sobre os dados armazenados,aplicar o predicado `WHERE` e retornar só as linhas que atendem a uma determinada condição.
+O Executor é uma camada responsável pela execução de consultas `SELECT` utilizando a filtragem `WHERE`,reutilizando os módulos já implementados. O seu objetivo é transformar uma representação produzida pelo parser em operações sobre os dados armazenados,aplicar o predicado `WHERE` e retornar só as linhas que atendem a uma determinada condição.
 
 ### Visão Geral
 
-#### Row/Tuple
+#### Row
 
 É a representação lógica de uma linha (tupla) de uma tabela. Ela não conhece páginas,registros ou arquivos: ela só guarda valores como INT e CHAR. 
 
@@ -1149,7 +1149,7 @@ typedef struct {
 ```  
 ----
 
-Um Row cria uma linha vazia com o esquema da tabela no catálogo: cada campo recebe nome,tipo e tamanho da coluna;valores são iniciados em 0.
+Um row cria uma linha vazia com o esquema da tabela no catálogo: cada campo recebe nome,tipo e tamanho da coluna;valores são iniciados em 0.
 
 ``` C
 int row_iniciar(Row *row, const TabelaCat *tabela) {
@@ -1173,7 +1173,7 @@ int row_iniciar(Row *row, const TabelaCat *tabela) {
 
 ---
 
-Um Row resolve o nome da coluna **através da sua posição**,emitindo um erro se a coluna não existe.
+Um row resolve o nome da coluna **através da sua posição**,emitindo um erro se a coluna não existe.
 
 ``` C
 static int row_resolve_nome(const Row *row, const char *nome) {
@@ -1188,7 +1188,7 @@ static int row_resolve_nome(const Row *row, const char *nome) {
 
 ---
 
-Um Row define o valor **de acordo com o tipo** e retorna um erro caso o tipo seja diferente
+Um row define o valor **de acordo com o tipo** e retorna um erro caso o tipo seja diferente
 
 ```C
 int row_definir_int(Row *row, int pos, int32_t valor) {
@@ -1208,7 +1208,7 @@ int row_definir_int(Row *row, int pos, int32_t valor) {
 
 ----
 
-Um Row lê o valor da coluna e retorna um erro **caso o tipo seja diferente**
+Um row lê o valor da coluna e retorna um erro **caso o tipo seja diferente**
 
 ``` C
 const char *row_obter_char(const Row *row, int pos) {
@@ -1227,7 +1227,7 @@ const char *row_obter_char(const Row *row, int pos) {
 
 ----
 
-Um Row pode ser convertido para um registro de 8 bytes usado pela Árvore B+,seguindo as mesmas restrições do catálogo.
+Um row pode ser convertido para um registro de 8 bytes usado pela Árvore B+,seguindo as mesmas restrições do catálogo.
 
 ```C
 int row_para_registro(const Row *row, Registro *reg) {
@@ -1259,7 +1259,7 @@ int row_para_registro(const Row *row, Registro *reg) {
 ```
 ----
 
-Um Row também pode ser montado a partir de um registro da Árvore B+.
+Um row também pode ser montado a partir de um registro da Árvore B+.
 
 ``` C
 int row_de_registro(Row *row, const TabelaCat *tabela, const Registro *reg) {
@@ -1289,11 +1289,11 @@ int row_de_registro(Row *row, const TabelaCat *tabela, const Registro *reg) {
 ---
 ##### Observações
 
-1. O Row representa uma nova camada lógica entre o catálogo e o armazenamento:antes o CraftDB trabalhava direto com o registro físico de 8 bytes;com o Row é possível visualizar a coluna e a sua linha,em vez de um `int32_t` empacotado.
+1. O row representa uma nova camada lógica entre o catálogo e o armazenamento:antes o CraftDB trabalhava direto com o registro físico de 8 bytes;com o row é possível visualizar a coluna e a sua linha,em vez de um `int32_t` empacotado.
 
-2. O Row é a base para um executor:um operador de varredura devolve Rows e um filtro as avalia.Não é mais necessário repassar a tabela.
+2. O row é a base para um executor:um operador de varredura devolve rows e um filtro as avalia.Não é mais necessário repassar a tabela.
 
-3. A função mais complexa de Row é o `row_inserir`,ela precisa achar a tabela no catálogo,conferir se o esquema do Row corresponde ao do catálogo,converter o Row para registro (o que pode falhar se o CHAR não caber),trocar o arquivo e reiniciar o cache,inserir na B+ e distinguir duplicata de erro,descarregar o cache e sincronizar o disco (para que a inserção possa sobreviver ao fim do programa).
+3. A função mais complexa de row é o `row_inserir`,ela precisa achar a tabela no catálogo,conferir se o esquema do row corresponde ao do catálogo,converter o row para registro (o que pode falhar se o CHAR não caber),trocar o arquivo e reiniciar o cache,inserir na B+ e distinguir duplicata de erro,descarregar o cache e sincronizar o disco (para que a inserção possa sobreviver ao fim do programa).
 
 ----
 #### Query Validator
@@ -1354,7 +1354,7 @@ Representa uma estrutura que valida a query em si. Ela guarda o código de valid
 
 ---
 
-A função principal do QueryValidator é `validar_consulta`,a qual valida um comando aceito pelo parser e não modifica o catálogo.
+A função principal do query validator é `validar_consulta`,a qual valida um comando aceito pelo parser e não modifica o catálogo.
 
 ```C
 static int validar_consulta(Validador *validador, Catalogo *cat,
@@ -1437,7 +1437,7 @@ static int processar_script(Catalogo *cat, const char *texto)
 
 2. `ConsultaValidada` traz `id_tabela,id_coluna`,tipo,tamanho e deslocamento.Logo,o executor não precisa buscar tabelas e colunas pelo nome.
 
-3. O pipeline de execução fica `Tokenizer->Parser ->QueryValidator` e cada etapa possuí uma responsabilidade,separando erros de semântica e sintaxe.
+3. O pipeline de execução fica `tokenizer --> parser --> query_validator` e cada etapa possuí uma responsabilidade,separando erros de semântica e sintaxe.
 
 4. Se qualquer parte da consulta for inválida,a saída é zerada e nada é executado,o que garante **atomicidade**.
 
@@ -1451,23 +1451,23 @@ static int processar_script(Catalogo *cat, const char *texto)
 
 #### Table Scan
 
-É um operador de **varredura sequencial**. Ele pecorre todos os registros armazenados e entrega tuplas lógicas (Row) uma por uma,seguindo o modelo iterador.O Table Scan do CraftDB não implementa WHERE:toda tupla que for válida será entregue.
+É um operador de **varredura sequencial**. Ele pecorre todos os registros armazenados e entrega tuplas lógicas (row) uma por uma,seguindo o modelo iterador.O table scan do CraftDB não implementa WHERE:toda tupla que for válida será entregue.
 
-O Table Scan utiliza os módulos anteriores da seguinte forma:
+O table scan utiliza os módulos anteriores da seguinte forma:
 
 1. Catálogo:é usado para **localizar a tabela pelo nome**.
 
-2. BPlusTree:é usada para **armazenar metadados**.A página 0 guarda a raiz,os dados ficam nas folhas.O scan desce da raiz até as folhas da esquerda e segue a cadeia de folhas.
+2. Árvore B+:é usada para **armazenar metadados**.A página 0 guarda a raiz,os dados ficam nas folhas.O scan desce da raiz até as folhas da esquerda e segue a cadeia de folhas.
 
 3. Cache:é usado para **fixar** e **soltar** páginas.Como a varredura é somente de leitura,as páginas **não são** marcadas como sujas.A varredura mantém só um pin na folha corrente,sendo liberado ao chegar no fim,em caso de erro,ou quando a operação de scan é finalizada.O cache não pode ser reiniciado enquanto a varredura estiver sendo feita no meio de uma folha,pois ele recusa páginas fixadas.
 
-4. Pager:é usado para **alocação** e **desserialização** de registros.
+4. Page:é usado para **alocação** e **desserialização** de registros.
 
 5. Row:é usado para **montar** a tupla lógica a partir de um registro físico.
 
 ----
 
-A `struct` do `TableScan` é composta por:metadados de uma tabela pertecente ao catálogo;um valor para informar se a operação está em andamento(`aberta`) e outro para informar se ela foi finalizada(`terminada`);também há um valor para informar a próxima folha a ser aberta,outro para informar o número de folhas abertas e um que informa a folha fixada;também há um inteiro que informa se há um pin ativo;o buffer de dados da página,o próximo slot e o número de chaves da folha(`slots_ocupados) compõem os últimos campos.
+A `struct` do Table Scan é composta por:metadados de uma tabela pertecente ao catálogo;um valor para informar se a operação está em andamento(`aberta`) e outro para informar se ela foi finalizada(`terminada`);também há um valor para informar a próxima folha a ser aberta,outro para informar o número de folhas abertas e um que informa a folha fixada;também há um inteiro que informa se há um pin ativo;o buffer de dados da página,o próximo slot e o número de chaves da folha(`slots_ocupados) compõem os últimos campos.
 
 ``` C
 typedef struct {
@@ -1487,7 +1487,7 @@ typedef struct {
 
 ---
 
-O Table Scan consulta o catálogo,aponta o sistema de páginas para o arquivo da tabela,lê a raiz nos metadados e localiza a primeira folha.
+O table scan consulta o catálogo,aponta o sistema de páginas para o arquivo da tabela,lê a raiz nos metadados e localiza a primeira folha.
 
 ``` C
 int table_scan_abrir(TableScan *scan, Catalogo *cat, const char *nome_tabela) {
@@ -1520,7 +1520,7 @@ int table_scan_abrir(TableScan *scan, Catalogo *cat, const char *nome_tabela) {
 }
 ```
 
-Enquanto Table Scan continuar operando,o catálogo não pode ser movido.Além disso,nenhuma página é fixada até a primeira chamada `next()`.
+Enquanto o table scan continuar operando,o catálogo não pode ser movido.Além disso,nenhuma página é fixada até a primeira chamada `next()`.
 
 ---
 

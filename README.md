@@ -2,27 +2,25 @@
 
 ## Introdução
 
-O **CraftDB** é um banco de dados desenvolvido em `C` a fim de compreender como Páginas,Árvores B+,Parsers,Executores,Transações e Logs funcionam a partir do baixo nível.
+O **CraftDB** é um banco de dados desenvolvido em C a fim de compreender como páginas,árvores B+,parsers,executores e filtros funcionam a partir do baixo nível.
 
-O intuito desse projeto não é desenvolver uma alternativa ao `SQLite`,mas sim criar algo simples capaz de ser entendido e executado por um sistema com especificações modestas.
+O intuito desse projeto não é desenvolver uma alternativa ao SQLite,mas sim criar algo simples capaz de ser entendido e executado por um sistema com especificações modestas.
 
 ## Descrição
 
-O CraftDB é desenvolvido a partir de 7 módulos,cada um representando uma **funcionalidade implementada**.Cada implementação é feita a partir do módulo anterior.
+O CraftDB é desenvolvido a partir de 5 módulos,cada um representando uma **funcionalidade implementada**.Cada implementação é feita a partir do módulo anterior.
 
-#### Módulo 1 - Páginas
+#### Módulo 1 - Página
 
-Trata-se de um **Sistema de Armazenamento de Páginas**,o qual é responsável por alocar bytes em unidades chamadas de Páginas,as quais estão armazenadas de forma física no disco.
+Trata-se de um **sistema de armazenamento de páginas**,o qual é responsável por alocar bytes em unidades chamadas de páginas,as quais estão armazenadas de forma física no disco.
 
 É o módulo de mais baixo nível,sendo a base para o desenvolvimento e o funcionamento dos módulos seguintes.
 
-#### Módulo 2 - Cache de Páginas
+#### Módulo 2 - Cache
 
-Trata-se de um mecanismo de **Cache**,o qual é responsável por acelerar as leituras realizadas pelo CraftDB às páginas.
+Trata-se de um mecanismo de **cache**,o qual é responsável por acelerar as leituras realizadas pelo CraftDB às páginas.
 
 Ele adota as políticas **STEAL** e **NO-FORCE**,junto do algoritmo **LRU**.Dessa forma,as páginas sujas podem ser gravadas em disco antes de um `COMMIT`.
-
-Esse módulo servirá de suporte aos `Logs` do **Módulo 6**.
 
 #### Módulo 3 - Árvore B+
 
@@ -30,19 +28,19 @@ Trata-se de uma estrutura de dados que armazena registros do tipo `int32`. Nela,
 
 Na Árvore B+ o número de chaves por nó é 3. Escolheu-se esse valor para fins didáticos pois com ele é fácil observar as divisões de nó. Além disso,com uma ordem 3,cerca de 99% da página fica vazia ao inserir 20.000 chaves,o que mantém a Árvore B+ com uma altura de 10.
 
-#### Módulo 4 - Parser & Catálogo
+#### Módulo 4 - Parser + Catálogo
 
-Trata-se de um conjunto de estruturas usadas para processar **comandos SQL**. Esse módulo é composto por `Tokenizer,Parser e Catalog`.
+Trata-se de um conjunto de estruturas usadas para processar **comandos SQL**. Esse módulo é composto por Tokenizer,Parser e Catálogo.
 
 ##### Tokenizer
 
-O `Tokenizer` é o componente que lê o texto bruto caractere por caractere e o transforma em uma sequência de **tokens**. Ele ignora espaços em brancos (excessivos),quebras de linha e comentários,agrupando caracteres válidos de acordo com as **regras léxicas** do SQL. Se o `Tokenizer` encontrar um caractere inválido (que não pertence ao vocabulário do SQL),ele interrompe o processo de tokenização imediatamente e retorna um erro léxico.
+O Tokenizer é o componente que lê o texto bruto caractere por caractere e o transforma em uma sequência de **tokens**. Ele ignora espaços em brancos (excessivos),quebras de linha e comentários,agrupando caracteres válidos de acordo com as **regras léxicas** do SQL. Se o `Tokenizer` encontrar um caractere inválido (que não pertence ao vocabulário do SQL),ele interrompe o processo de tokenização imediatamente e retorna um erro léxico.
 
 ---
 
 ##### Parser
 
-O `Parser` é o componente que recebe a sequência linear de tokens geradas pelo `Tokenizer` e a analisa com base nas **regras gramaticais** do SQL. A sua função é garantir que a estrutura do comando siga as regras gramaticais e montar uma representação hierárquica chamada de **Árvore de Sintaxe Abstrata (AST)**.
+O Parser é o componente que recebe a sequência linear de tokens geradas pelo Tokenizer e a analisa com base nas **regras gramaticais** do SQL. A sua função é garantir que a estrutura do comando siga as regras gramaticais e montar uma representação hierárquica chamada de **Árvore de Sintaxe Abstrata (AST)**.
 
 Em uma AST,uma query pode ser representada da seguinte forma:
 
@@ -57,11 +55,11 @@ Se você digitar algo estruturalmente incorreto, como `SELECT FROM usuarios WHER
 
 ----
 
-##### Catalog
+##### Catálogo
 
-O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colunas cada tabela possuí,o tipo de dado,o tamanho em bytes e a posição de cada coluna de acordo com o registro (página). Ele é a **ponte** entre o `Parser` e o `Executor`.
+O Catálogo guarda os **metadados** do CraftDB: quais tabelas existem,quais colunas cada tabela possuí,o tipo de dado,o tamanho em bytes e a posição de cada coluna de acordo com o registro (página). Ele é a **ponte** entre o Parser e o Executor.
 
-#### Módulo 5 - Executor
+#### Módulo 5 - Executor + Filtro
 
 ## Autores
 
@@ -71,11 +69,11 @@ O `Catalog` guarda os **metadados** do CraftDB: quais tabelas existem,quais colu
 
 ## Como Executar
 
-1. Vá até a pasta `Main` em `src/Main`
+1. Vá até a pasta `main` em `src/main`
 
 2. Baixe o arquivo `main.c`
 
-3. Baixe os arquivos de módulos em `src/Modules`
+3. Baixe os arquivos de módulos em `src/modules`
 
 4. Coloque-os junto do `main`
 
