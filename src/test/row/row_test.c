@@ -1,5 +1,5 @@
 #define ROW_MAIN
-#include "row.c"
+#include "../../modules/executor/row/row.c"
 
 #include <assert.h>
 

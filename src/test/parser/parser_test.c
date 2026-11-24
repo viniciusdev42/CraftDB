@@ -23,7 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "parser.c"
+#include "../../modules/parser/parser.c"
 
 /* ================================================================== */
 /* Mini-framework de testes                                            */

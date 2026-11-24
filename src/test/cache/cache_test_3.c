@@ -21,7 +21,7 @@
  */
 
 #define NUM_FRAMES 1
-#include "cache.c"
+#include "../../modules/storage/cache.c"
 
 #define PAGINA_TESTE   0
 #define SLOT_TESTE     0
@@ -32,15 +32,15 @@ static void modo_escritor(void) {
     printf("=== Teste 3 [Processo A - escritor] ===\n");
     remove(ARQUIVO_DB); /* comeca de um banco vazio */
 
-    int p0 = aloca_pagina(); /* devera ser a pagina 0, pois o arquivo comeca vazio */
-    int p1 = aloca_pagina(); /* segunda pagina, usada apenas para forcar a expulsao de p0 */
+    int p0 = alocar_pagina(); /* devera ser a pagina 0, pois o arquivo comeca vazio */
+    int p1 = alocar_pagina(); /* segunda pagina, usada apenas para forcar a expulsao de p0 */
 
     if (p0 != PAGINA_TESTE || p1 < 0) {
         fprintf(stderr, "[FALHOU] Erro de preparacao do teste (p0=%d, p1=%d)\n", p0, p1);
         exit(1);
     }
 
-    unsigned char *buf = fixa(p0);
+    unsigned char *buf = fixar(p0);
     if (buf == NULL) {
         fprintf(stderr, "[FALHOU] Nao foi possivel fixar a pagina %d\n", p0);
         exit(1);
@@ -48,23 +48,23 @@ static void modo_escritor(void) {
 
     Registro alterado = { .id = ID_ESPERADO, .valor = VALOR_ESPERADO };
     unsigned char bytes[TAMANHO_REGISTRO];
-    serializa_registro(&alterado, bytes);
+    serializar_registro(&alterado, bytes);
     memcpy(buf + TAMANHO_CABECALHO + SLOT_TESTE * TAMANHO_REGISTRO, bytes, TAMANHO_REGISTRO);
 
     /* Solta marcando a pagina como SUJA. Politica NO-FORCE: neste momento
        a alteracao ainda NAO foi gravada em disco - existe apenas em memoria. */
-    solta(p0, 1);
+    soltar(p0, 1);
 
-    /* Com capacidade=1 e p0 ja solta (sem fixacoes), fixar p1 (uma pagina
+    /* Com capacidade=1 e p0 ja soltar (sem fixacoes), fixar p1 (uma pagina
        diferente) obriga o cache a expulsar p0 para liberar o unico frame. */
-    unsigned char *buf2 = fixa(p1);
+    unsigned char *buf2 = fixar(p1);
     if (buf2 == NULL) {
         fprintf(stderr, "[FALHOU] Nao foi possivel fixar a pagina %d\n", p1);
         exit(1);
     }
-    solta(p1, 0);
+    soltar(p1, 0);
 
-    int p0_ainda_em_cache = (busca_frame(p0) != -1);
+    int p0_ainda_em_cache = (buscar_frame(p0) != -1);
     printf("Pagina %d ainda esta em cache apos fixar %d? %s (esperado: nao)\n",
            p0, p1, p0_ainda_em_cache ? "sim" : "nao");
 
@@ -90,7 +90,7 @@ static void modo_leitor(void) {
     }
 
     Registro lido;
-    desserializa_registro(pg + TAMANHO_CABECALHO + SLOT_TESTE * TAMANHO_REGISTRO, &lido);
+    desserializar_registro(pg + TAMANHO_CABECALHO + SLOT_TESTE * TAMANHO_REGISTRO, &lido);
 
     printf("Lido do disco: id=%d, valor=%d (esperado: id=%d, valor=%d)\n",
            lido.id, lido.valor, ID_ESPERADO, VALOR_ESPERADO);

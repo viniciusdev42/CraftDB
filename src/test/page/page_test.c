@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "page.c"
+#include "../../modules/storage/page.c"
 
 static int testes_executados = 0;
 static int testes_ok = 0;
@@ -32,12 +32,12 @@ static void teste_alocacao_paginas(void) {
 
     VERIFICA("banco comeca sem paginas alocadas", total_paginas_alocadas() == 0);
 
-    int p0 = aloca_pagina();
+    int p0 = alocar_pagina();
     VERIFICA("primeira pagina alocada recebe numero 0", p0 == 0);
     VERIFICA("total de paginas alocadas passa a ser 1", total_paginas_alocadas() == 1);
 
-    int p1 = aloca_pagina();
-    int p2 = aloca_pagina();
+    int p1 = alocar_pagina();
+    int p2 = alocar_pagina();
     VERIFICA("paginas sao alocadas sequencialmente (numero 1)", p1 == 1);
     VERIFICA("paginas sao alocadas sequencialmente (numero 2)", p2 == 2);
     VERIFICA("total de paginas alocadas passa a ser 3", total_paginas_alocadas() == 3);
@@ -49,26 +49,26 @@ static void teste_alocacao_paginas(void) {
 static void teste_validacoes(void) {
     printf("\n== Teste: validacao de buffer e numero de pagina ==\n");
     reinicia_banco();
-    aloca_pagina(); /* pagina 0 valida, usada nos testes de sucesso */
+    alocar_pagina(); /* pagina 0 valida, usada nos testes de sucesso */
 
     unsigned char buffer_correto[TAMANHO_PAGINA];
     unsigned char buffer_pequeno[10];
     memset(buffer_correto, 0xAA, sizeof(buffer_correto));
 
-    VERIFICA("escreve_pagina rejeita buffer menor que TAMANHO_PAGINA",
-             escreve_pagina(0, buffer_pequeno, sizeof(buffer_pequeno)) != 0);
+    VERIFICA("escrever_pagina rejeita buffer menor que TAMANHO_PAGINA",
+             escrever_pagina(0, buffer_pequeno, sizeof(buffer_pequeno)) != 0);
 
-    VERIFICA("escreve_pagina rejeita buffer NULL",
-             escreve_pagina(0, NULL, TAMANHO_PAGINA) != 0);
+    VERIFICA("escrever_pagina rejeita buffer NULL",
+             escrever_pagina(0, NULL, TAMANHO_PAGINA) != 0);
 
-    VERIFICA("escreve_pagina rejeita numero de pagina negativo",
-             escreve_pagina(-1, buffer_correto, sizeof(buffer_correto)) != 0);
+    VERIFICA("escrever_pagina rejeita numero de pagina negativo",
+             escrever_pagina(-1, buffer_correto, sizeof(buffer_correto)) != 0);
 
-    VERIFICA("escreve_pagina rejeita pagina ainda nao alocada",
-             escreve_pagina(5, buffer_correto, sizeof(buffer_correto)) != 0);
+    VERIFICA("escrever_pagina rejeita pagina ainda nao alocada",
+             escrever_pagina(5, buffer_correto, sizeof(buffer_correto)) != 0);
 
-    VERIFICA("escreve_pagina aceita pagina valida com buffer correto",
-             escreve_pagina(0, buffer_correto, sizeof(buffer_correto)) == 0);
+    VERIFICA("escrever_pagina aceita pagina valida com buffer correto",
+             escrever_pagina(0, buffer_correto, sizeof(buffer_correto)) == 0);
 
     VERIFICA("ler_pagina rejeita buffer menor que TAMANHO_PAGINA",
              ler_pagina(0, buffer_pequeno, sizeof(buffer_pequeno)) != 0);
@@ -86,15 +86,15 @@ static void teste_validacoes(void) {
 static void teste_leitura_escrita(void) {
     printf("\n== Teste: escrita e leitura de pagina ==\n");
     reinicia_banco();
-    aloca_pagina();
+    alocar_pagina();
 
     unsigned char escrita[TAMANHO_PAGINA];
     unsigned char leitura[TAMANHO_PAGINA];
     memset(escrita, 0x5A, sizeof(escrita));
     memset(leitura, 0x00, sizeof(leitura));
 
-    VERIFICA("escreve_pagina grava com sucesso",
-             escreve_pagina(0, escrita, sizeof(escrita)) == 0);
+    VERIFICA("escrever_pagina grava com sucesso",
+             escrever_pagina(0, escrita, sizeof(escrita)) == 0);
 
     VERIFICA("ler_pagina le com sucesso",
              ler_pagina(0, leitura, sizeof(leitura)) == 0);
@@ -109,9 +109,9 @@ static void teste_leitura_escrita(void) {
 static void teste_isolamento_paginas(void) {
     printf("\n== Teste: isolamento entre paginas ==\n");
     reinicia_banco();
-    aloca_pagina();
-    aloca_pagina();
-    aloca_pagina();
+    alocar_pagina();
+    alocar_pagina();
+    alocar_pagina();
 
     unsigned char pagina0[TAMANHO_PAGINA];
     unsigned char conteudo_pagina1[TAMANHO_PAGINA];
@@ -122,14 +122,14 @@ static void teste_isolamento_paginas(void) {
     memset(conteudo_pagina1, 0x99, sizeof(conteudo_pagina1));
     memset(pagina2, 0x33, sizeof(pagina2));
 
-    escreve_pagina(0, pagina0, sizeof(pagina0));
-    escreve_pagina(1, conteudo_pagina1, sizeof(conteudo_pagina1));
+    escrever_pagina(0, pagina0, sizeof(pagina0));
+    escrever_pagina(1, conteudo_pagina1, sizeof(conteudo_pagina1));
 
     ler_pagina(0, leitura, sizeof(leitura));
     VERIFICA("escrever na pagina 1 nao altera a pagina 0",
              memcmp(leitura, pagina0, TAMANHO_PAGINA) == 0);
 
-    escreve_pagina(2, pagina2, sizeof(pagina2));
+    escrever_pagina(2, pagina2, sizeof(pagina2));
 
     ler_pagina(1, leitura, sizeof(leitura));
     VERIFICA("escrever na pagina 2 nao altera a pagina 1",
@@ -146,10 +146,10 @@ static void teste_isolamento_paginas(void) {
 static void teste_sincronizacao(void) {
     printf("\n== Teste: sincronizacao de dados ==\n");
     reinicia_banco();
-    aloca_pagina();
+    alocar_pagina();
 
-    VERIFICA("sincroniza_dados funciona com o arquivo existente",
-             sincroniza_dados() == 0);
+    VERIFICA("sincronizar_dados funciona com o arquivo existente",
+             sincronizar_dados() == 0);
 }
 
 /* ---------------------------------------------------------------------
@@ -166,8 +166,8 @@ static void teste_serializacao(void) {
     unsigned char bytes[TAMANHO_REGISTRO];
     Registro recuperado;
 
-    serializa_registro(&original, bytes);
-    desserializa_registro(bytes, &recuperado);
+    serializar_registro(&original, bytes);
+    desserializar_registro(bytes, &recuperado);
 
     VERIFICA("round-trip preserva o campo id",
              recuperado.id == original.id);
@@ -184,33 +184,33 @@ static void teste_serializacao(void) {
         0x2A, 0x00, 0x00, 0x00   /* valor (42) em little-endian        */
     };
     unsigned char obtido[TAMANHO_REGISTRO];
-    serializa_registro(&conhecido, obtido);
+    serializar_registro(&conhecido, obtido);
 
     VERIFICA("bytes gerados seguem exatamente o layout little-endian",
              memcmp(obtido, esperado, TAMANHO_REGISTRO) == 0);
 
     Registro lido_dos_bytes_esperados;
-    desserializa_registro(esperado, &lido_dos_bytes_esperados);
+    desserializar_registro(esperado, &lido_dos_bytes_esperados);
     VERIFICA("desserializar bytes little-endian conhecidos reconstroi o registro certo",
              lido_dos_bytes_esperados.id == conhecido.id &&
              lido_dos_bytes_esperados.valor == conhecido.valor);
 
     /* Integracao: grava um registro serializado numa pagina de verdade e o releu */
     reinicia_banco();
-    aloca_pagina();
+    alocar_pagina();
 
     unsigned char pagina[TAMANHO_PAGINA];
     memset(pagina, 0, sizeof(pagina));
     memcpy(pagina + TAMANHO_CABECALHO, obtido, TAMANHO_REGISTRO);
 
     VERIFICA("pagina com registro serializado e gravada com sucesso",
-             escreve_pagina(0, pagina, sizeof(pagina)) == 0);
+             escrever_pagina(0, pagina, sizeof(pagina)) == 0);
 
     unsigned char pagina_lida[TAMANHO_PAGINA];
     ler_pagina(0, pagina_lida, sizeof(pagina_lida));
 
     Registro registro_do_disco;
-    desserializa_registro(pagina_lida + TAMANHO_CABECALHO, &registro_do_disco);
+    desserializar_registro(pagina_lida + TAMANHO_CABECALHO, &registro_do_disco);
 
     VERIFICA("registro lido do disco e desserializado corretamente",
              registro_do_disco.id == conhecido.id &&
@@ -243,7 +243,7 @@ static void teste_persistencia(const char *caminho_executavel) {
     reinicia_banco();
 
     while (total_paginas_alocadas() <= 2) {
-        aloca_pagina();
+        alocar_pagina();
     }
 
     unsigned char registro[TAMANHO_REGISTRO] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
@@ -253,7 +253,7 @@ static void teste_persistencia(const char *caminho_executavel) {
     memcpy(pagina + TAMANHO_CABECALHO, registro, TAMANHO_REGISTRO);
 
     VERIFICA("registro gravado com sucesso antes de encerrar o processo",
-             escreve_pagina(2, pagina, sizeof(pagina)) == 0);
+             escrever_pagina(2, pagina, sizeof(pagina)) == 0);
 
     /* Encerra este "processo de escrita" e inicia um processo TOTALMENTE
      * NOVO para verificar se os dados sobreviveram no arquivo em disco. */

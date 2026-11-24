@@ -1,5 +1,5 @@
 #define  VALIDATOR_MAIN
-#include "query_validator.c"
+#include "../../modules/executor/validator/query_validator.c"
 
 #include <stdio.h>
 

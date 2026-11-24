@@ -11,10 +11,9 @@
  */
 
 /* Evita os main() de row.c e de table_scan.c: este arquivo tem o seu proprio */
-#define ROW_MAIN
-#define TABLE_SCAN_MAIN
-#include "table_scan.c"
-
+#define main TABLE_SCAN_SEM_MAIN
+#include "../../modules/executor/scan/table_scan.c"
+#undef main
 /* ------------------------------------------------------------------ */
 /* Mini-framework de asserts                                           */
 /* ------------------------------------------------------------------ */

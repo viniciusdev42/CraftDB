@@ -12,18 +12,18 @@
  * que o teste distingue de fato LRU de FIFO.
  *
  * Sequencia de acessos (p0, p1, p2 sao as 3 primeiras paginas; p3 a 4a):
- *   fixa/solta p0                      -> cache: [p0]
- *   fixa/solta p1                      -> cache: [p0, p1]
- *   fixa/solta p2                      -> cache: [p0, p1, p2]   (cheio)
- *   fixa/solta p0 de novo              -> p0 volta a ser a mais recente;
+ *   fixar/soltar p0                      -> cache: [p0]
+ *   fixar/soltar p1                      -> cache: [p0, p1]
+ *   fixar/soltar p2                      -> cache: [p0, p1, p2]   (cheio)
+ *   fixar/soltar p0 de novo              -> p0 volta a ser a mais recente;
  *                                          p1 passa a ser a MENOS recente
- *   fixa/solta p3                      -> FALTA, cache cheio -> expulsa
+ *   fixar/soltar p3                      -> FALTA, cache cheio -> expulsa
  *                                          a LRU, que deve ser p1
  *
  */
 
 #define NUM_FRAMES 3
-#include "cache.c"
+#include "../../modules/storage/cache.c"
 
 static int testes_totais = 0;
 static int testes_ok = 0;
@@ -41,36 +41,36 @@ int main(void) {
 
     VERIFICA(cache.capacidade == 3, "capacidade do cache e 3 (definida via NUM_FRAMES)");
 
-    int p0 = aloca_pagina();
-    int p1 = aloca_pagina();
-    int p2 = aloca_pagina();
-    int p3 = aloca_pagina();
+    int p0 = alocar_pagina();
+    int p1 = alocar_pagina();
+    int p2 = alocar_pagina();
+    int p3 = alocar_pagina();
     VERIFICA(p0 >= 0 && p1 >= 0 && p2 >= 0 && p3 >= 0, "as 4 paginas de teste foram alocadas com sucesso");
 
     /* Preenche o cache com as 3 primeiras paginas */
-    VERIFICA(fixa(p0) != NULL, "p0 fixada"); solta(p0, 0);
-    VERIFICA(fixa(p1) != NULL, "p1 fixada"); solta(p1, 0);
-    VERIFICA(fixa(p2) != NULL, "p2 fixada"); solta(p2, 0);
+    VERIFICA(fixar(p0) != NULL, "p0 fixada"); soltar(p0, 0);
+    VERIFICA(fixar(p1) != NULL, "p1 fixada"); soltar(p1, 0);
+    VERIFICA(fixar(p2) != NULL, "p2 fixada"); soltar(p2, 0);
 
     VERIFICA(cache.uso == 3, "cache esta com uso=3 (cheio, capacidade=3)");
-    VERIFICA(busca_frame(p0) != -1 && busca_frame(p1) != -1 && busca_frame(p2) != -1,
+    VERIFICA(buscar_frame(p0) != -1 && buscar_frame(p1) != -1 && buscar_frame(p2) != -1,
               "p0, p1 e p2 estao todas residentes no cache");
 
     /* Retoca p0: agora p0 e' a mais recentemente usada; p1 passa a ser a LRU */
-    VERIFICA(fixa(p0) != NULL, "p0 refixada (retocada)"); solta(p0, 0);
+    VERIFICA(fixar(p0) != NULL, "p0 refixada (retocada)"); soltar(p0, 0);
 
     /* Introduz a 4a pagina distinta: forca uma expulsao no cache cheio */
-    unsigned char *ref_p3 = fixa(p3);
+    unsigned char *ref_p3 = fixar(p3);
     VERIFICA(ref_p3 != NULL, "p3 fixada com sucesso (miss que forca expulsao)");
-    solta(p3, 0);
+    soltar(p3, 0);
 
     VERIFICA(cache.uso == 3, "apos a expulsao, o cache continua com uso=3 (capacidade respeitada)");
 
     /* Verificacao central do teste: p1 (a LRU) foi expulsa; as demais permanecem */
-    VERIFICA(busca_frame(p1) == -1, "p1 (a MENOS recentemente usada) foi expulsa do cache");
-    VERIFICA(busca_frame(p0) != -1, "p0 (retocada por ultimo) permanece no cache");
-    VERIFICA(busca_frame(p2) != -1, "p2 permanece no cache");
-    VERIFICA(busca_frame(p3) != -1, "p3 (recem-fixada) esta no cache");
+    VERIFICA(buscar_frame(p1) == -1, "p1 (a MENOS recentemente usada) foi expulsa do cache");
+    VERIFICA(buscar_frame(p0) != -1, "p0 (retocada por ultimo) permanece no cache");
+    VERIFICA(buscar_frame(p2) != -1, "p2 permanece no cache");
+    VERIFICA(buscar_frame(p3) != -1, "p3 (recem-fixada) esta no cache");
 
     VERIFICA(cache.faltas == 4, "4 faltas no total (p0, p1, p2 e p3, cada uma na primeira fixacao)");
     VERIFICA(cache.acertos == 1, "1 acerto no total (a refixacao de p0)");

@@ -25,7 +25,7 @@
 
 #define CRAFT_DB_TEST_BUILD
 
-#include "b_plus_tree.c"
+#include "../../modules/index/b_plus_tree.c"
 
 /* ======================================================================
  * Mini framework de testes
@@ -144,14 +144,14 @@ static int altura_arvore(void) {
 static void reinicia_ambiente(void) {
     unlink(ARQUIVO_DB);
     cache_inicializado = 0;       /* descarta qualquer frame (inclusive sujo) */
-    inicializa_cache();
+    inicializar_cache();
     contador_leituras_disco = 0;
 }
 
 static int descarrega_tudo(void) {
     for (int i = 0; i < NUM_FRAMES; i++) {
         if (cache.frames[i].pagina != -1 &&
-            descarrega(cache.frames[i].pagina) != 0) {
+            descarregar(cache.frames[i].pagina) != 0) {
             return -1;
         }
     }
@@ -162,7 +162,7 @@ static int descarrega_tudo(void) {
 static int reinicia_cache_mantendo_disco(void) {
     if (descarrega_tudo() != 0) return -1;
     cache_inicializado = 0;
-    inicializa_cache();
+    inicializar_cache();
     return 0;
 }
 
@@ -241,11 +241,11 @@ static int audita_no(int pagina, int tem_lo, int32_t lo, int tem_hi, int32_t hi,
     visitada[pagina] = 1;
 
     /* leitura "crua" para detectar lixo que desserializar_no esconderia */
-    unsigned char *bruto = fixa(pagina);
+    unsigned char *bruto = fixar(pagina);
     if (bruto == NULL) return audita_erro("nao foi possivel ler a pagina %d", pagina);
-    int32_t tipo_bruto = (int32_t)desserializa_uint32_le(bruto);
-    int32_t nc_bruto   = (int32_t)desserializa_uint32_le(bruto + 4);
-    solta(pagina, 0);
+    int32_t tipo_bruto = (int32_t)desserializar_uint32_little_endian(bruto);
+    int32_t nc_bruto   = (int32_t)desserializar_uint32_little_endian(bruto + 4);
+    soltar(pagina, 0);
     if (tipo_bruto != NO_FOLHA && tipo_bruto != NO_INTERNO)
         return audita_erro("pagina %d com tipo invalido (%d)", pagina, tipo_bruto);
     if (nc_bruto < 0 || nc_bruto > MAX_CHAVES)
@@ -993,10 +993,10 @@ static void teste_serializacao_de_no(void) {
 
     /* ---- numero_chaves corrompido e tratado como no vazio ---- */
     serializar_no(&a, pagina);
-    serializa_uint32_le(99, pagina + 4);
+    serializar_uint32_little_endian(99, pagina + 4);
     desserializar_no(pagina, &b);
     VERIFICA_IGUAL(0, b.numero_chaves);
-    serializa_uint32_le((uint32_t)-1, pagina + 4);
+    serializar_uint32_little_endian((uint32_t)-1, pagina + 4);
     desserializar_no(pagina, &b);
     VERIFICA_IGUAL(0, b.numero_chaves);
 }
@@ -1160,7 +1160,7 @@ static void executa_teste(const char *nome, void (*fn)(void)) {
         verificacoes++;
         if (fixacoes_pendentes() != 0) {
             falhas_teste_atual++;
-            printf("    -> %d fixacao(oes) pendente(s) ao final do teste (fixa/solta desbalanceados)\n",
+            printf("    -> %d fixacao(oes) pendente(s) ao final do teste (fixar/soltar desbalanceados)\n",
                    fixacoes_pendentes());
         }
         *verif_compartilhada = verificacoes;
