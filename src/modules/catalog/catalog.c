@@ -27,23 +27,33 @@
  * Persistencia: arquivo texto "catalogo.cat" (veja ARQUIVO_CATALOGO).
  * So nome e tipo das colunas sao gravados; tamanhos e deslocamentos sao
  * recalculados ao carregar, pelas mesmas regras usadas no CREATE TABLE.
- 
  *
- * Uso:
- *   ./catalogo                      executa um exemplo embutido
- *   ./catalogo script.sql           executa os comandos do arquivo
- *   ./catalogo script.sql meu.cat   usa outro arquivo de catalogo
+ * Este arquivo e' uma biblioteca (nao tem main) e pode ser incluido por varios
+ * modulos: a guarda CATALOG evita definicoes duplicadas.
  */
+
+#ifndef CATALOG
+#define CATALOG
 
 /* O Parser traz funcoes auxiliares que este programa nao usa (ex.: imprimir) */
 #if defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Todos os includes do projeto usam caminhos a partir da pasta src/
+   (compile com -Isrc). */
 #include "../storage/page.c"
 #include "../storage/cache.c"
 #include "../index/b_plus_tree.c"
 #include "../parser/parser.c"
+
 /* ------------------------------------------------------------------ */
 /* Constantes                                                          */
 /* ------------------------------------------------------------------ */
@@ -592,3 +602,5 @@ static int catalogo_carregar(Catalogo *cat, const char *caminho)
     }
     return 1;
 }
+
+#endif /* CATALOG */

@@ -6,7 +6,7 @@
  * consome precise conhecer arvore B+, cache, paginas ou o formato fisico
  * de 8 bytes do registro.
  *
- * O query_result guarda duas coisas:
+ * O QueryResult guarda duas coisas:
  *
  *   1) METADADOS das colunas projetadas (nome, tipo, tamanho e a posicao
  *      da coluna na tabela de origem), NA ORDEM EM QUE FORAM SOLICITADAS.
@@ -22,8 +22,8 @@
  *   - CURSOR SEQUENCIAL: qr_proxima(qr)       -> proxima linha, NULL no fim
  *                        qr_reiniciar_cursor(qr) volta ao inicio
  *
- * Acesso aos valores (como em row): por POSICAO ou por NOME da coluna
- * (nomes nao diferenciam maiusculas/minusculas, regra do catalogo). O tipo
+ * Acesso aos valores (como em Row): por POSICAO ou por NOME da coluna
+ * (nomes nao diferenciam maiusculas/minusculas, regra do Catalogo). O tipo
  * do catalogo e' preservado: ler uma coluna INT como CHAR (ou vice-versa)
  * e' rejeitado com erro.
  *
@@ -37,9 +37,8 @@
 #ifndef QUERY_RESULT
 #define QUERY_RESULT
 
-#define main ROW_SEM_MAIN
 #include "../row/row.c"
-#undef main
+
 /* ------------------------------------------------------------------ */
 /* Estruturas                                                          */
 /* ------------------------------------------------------------------ */
@@ -161,7 +160,7 @@ static int qr_garantir_capacidade(QueryResult *qr) {
 
 /*
  qr_adicionar_row(qr, row)
- Projeta a row (esquema da tabela inteira) sobre as colunas do resultado e
+ Projeta a Row (esquema da tabela inteira) sobre as colunas do resultado e
  acrescenta a linha ao fim. Confere tabela e tipo de cada coluna projetada.
  ATENCAO: ponteiros obtidos antes por qr_linha()/qr_proxima() podem ficar
  invalidos apos uma adicao (o vetor pode ser realocado).
@@ -173,7 +172,7 @@ int qr_adicionar_row(QueryResult *qr, const Row *row) {
         return -1;
     }
     if (!contexto_igual(qr->tabela, row->tabela)) {
-        fprintf(stderr, "Erro: a row da tabela '%s' nao pertence ao resultado da tabela '%s'\n",
+        fprintf(stderr, "Erro: a Row da tabela '%s' nao pertence ao resultado da tabela '%s'\n",
                 row->tabela, qr->tabela);
         return -1;
     }
@@ -182,7 +181,7 @@ int qr_adicionar_row(QueryResult *qr, const Row *row) {
     for (int i = 0; i < qr->numero_colunas; i++) {
         int origem = qr->colunas[i].posicao_origem;
         if (origem >= row->numero_campos || row->campos[origem].tipo != qr->colunas[i].tipo) {
-            fprintf(stderr, "Erro: a row nao confere com a coluna '%s' do resultado\n",
+            fprintf(stderr, "Erro: a Row nao confere com a coluna '%s' do resultado\n",
                     qr->colunas[i].nome);
             return -1;
         }
@@ -206,10 +205,10 @@ int qr_adicionar_row(QueryResult *qr, const Row *row) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Execucao: tabela (B+ / cache / page) -> query_result                */
+/* Execucao: tabela (B+ / cache / pager) -> QueryResult                */
 /* ------------------------------------------------------------------ */
 
-/* Contexto que adapta o callback de row (row_percorrer) ao query_result. */
+/* Contexto que adapta o callback de Row (row_percorrer) ao QueryResult. */
 typedef struct {
     QueryResult *qr;
     int        (*filtro)(const Row *, void *);
@@ -432,6 +431,9 @@ void qr_imprimir(const QueryResult *qr) {
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
+/* O main so existe com -DQUERY_RESULT_MAIN. */
+#ifdef QUERY_RESULT_MAIN
+
 /* Filtro de exemplo: mantem as linhas com id >= *arg. */
 static int filtro_id_minimo(const Row *row, void *arg) {
     int32_t id = 0;
@@ -440,7 +442,7 @@ static int filtro_id_minimo(const Row *row, void *arg) {
     }
     return id >= *(const int32_t *)arg;
 }
-#ifdef QUERY_RESULT_SEM_MAIN
+
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -525,5 +527,7 @@ int main(void) {
     remove("alunos.dat");
     return 0;
 }
-#endif /*QUERY_RESULT_SEM_MAIN*/
+
+#endif /* QUERY_RESULT_MAIN */
+
 #endif /* QUERY_RESULT */

@@ -2,7 +2,7 @@
  *                 PREDICATE EVALUATOR
  * ============================================================
  *
- * Avalia PREDICADOS (expressoes booleanas) sobre uma row e decide se a linha
+ * Avalia PREDICADOS (expressoes booleanas) sobre uma Row e decide se a linha
  * deve permanecer no resultado de um SELECT.
  *
  * Camadas (cada uma so depende da anterior):
@@ -11,7 +11,7 @@
  *                   (avaliar_expressao), que resolve colunas, literais e tipos.
  *   2) Logicos    : AND, OR, NOT, compostos livremente (arvore de predicados).
  *   3) Linha      : linha_permanece(), que aplica um predicado (ou o WHERE de
- *                   um Comando do parser) e diz se a linha fica ou sai.
+ *                   um Comando do Parser) e diz se a linha fica ou sai.
  *
  * Expressoes booleanas NAO suportadas nunca passam em silencio: viram erro com
  * mensagem em Avaliador.mensagem, em vez de serem tratadas como "falso" ou
@@ -35,9 +35,7 @@
 #ifndef PREDICATE_EVALUATOR
 #define PREDICATE_EVALUATOR
 
-#define main EXPRESSION_EVALUATOR_SEM_MAIN
 #include "expression_evaluator.c"
-#undef main 
 
 /* Profundidade maxima da arvore; evita estouro de pilha e ciclos acidentais. */
 #define MAX_PROFUNDIDADE_PREDICADO 64
@@ -242,7 +240,7 @@ static int pred_avaliar(Avaliador *av, const Predicado *p, const Row *row,
 
 /*
  avaliar_predicado(av, predicado, row, resultado)
- Avalia a arvore de predicados contra a row. *resultado recebe 0 ou 1.
+ Avalia a arvore de predicados contra a Row. *resultado recebe 0 ou 1.
  'row' pode ser NULL apenas se o predicado nao referenciar colunas.
  Retorna 0 em sucesso, -1 em erro (mensagem em av->mensagem).
 */
@@ -328,7 +326,10 @@ static int linha_permanece_where(Avaliador *av, const Comando *comando, const Ro
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
-/* Monta a row na mao: o avaliador nao precisa de catalogo nem de disco. */
+/* O main so existe com -DPREDICATE_EVALUATOR_MAIN. */
+#ifdef PREDICATE_EVALUATOR_MAIN
+
+/* Monta a Row na mao: o avaliador nao precisa de catalogo nem de disco. */
 static void demo_pred_campo(Row *row, const char *nome, TipoToken tipo, int32_t inteiro,
                             const char *texto)
 {
@@ -374,7 +375,7 @@ static void demo_pred_where(const Row *row, const char *sql)
     else
         printf("%-58s -> %s\n", sql, permanece ? "permanece" : "descartada");
 }
-#ifdef PREDICATE_EVALUATOR_SEM_MAIN
+
 int main(void)
 {
     Row row;
@@ -463,5 +464,7 @@ int main(void)
     demo_pred_where(&row, "SELECT * FROM alunos WHERE id = 'abc';");
     return 0;
 }
-#endif /*PREDICATE_EVALUATOR_SEM_MAIN*/
+
+#endif /* PREDICATE_EVALUATOR_MAIN */
+
 #endif /* PREDICATE_EVALUATOR */

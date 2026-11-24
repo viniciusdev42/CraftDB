@@ -3,27 +3,27 @@
  * ============================================================
  *
  * Operador de varredura sequencial de uma tabela. Percorre TODOS os registros
- * armazenados e entrega, um por vez, tuplas logicas (row), no modelo iterador:
+ * armazenados e entrega, um por vez, tuplas logicas (Row), no modelo iterador:
  *
  *      table_scan_abrir()  ->  table_scan_next() ... table_scan_next()  ->  table_scan_fechar()
  *
  * Esta versao NAO implementa WHERE: toda tupla valida e' entregue. Um filtro
- * pode ser aplicado por quem chama, sobre a row devolvida por table_scan_next().
+ * pode ser aplicado por quem chama, sobre a Row devolvida por table_scan_next().
  *
  * Camadas utilizadas:
  *
- *   catalog   -> catalogo_buscar_tabela() localiza a tabela pelo nome e
- *                selecionar_arquivo_tabela() aponta a page para o arquivo de dados
+ *   Catalog   -> catalogo_buscar_tabela() localiza a tabela pelo nome e
+ *                selecionar_arquivo_tabela() aponta o Pager para o arquivo de dados
  *                dela (reiniciando o cache, que nao sabe de qual arquivo vem cada frame).
- *   b_plus_tree -> metadados: a pagina 0 guarda a RAIZ (ler_raiz). Os dados ficam nas
+ *   BPlusTree -> metadados: a pagina 0 guarda a RAIZ (ler_raiz). Os dados ficam nas
  *                FOLHAS (NO_FOLHA), encadeadas pelo campo 'proxima'. O scan desce da
  *                raiz ate a folha mais a esquerda e segue a cadeia de folhas.
- *   cache     -> fixar(n) abre a pagina n (pin) e soltar(n, 0) a libera. A varredura
+ *   Cache     -> fixar(n) abre a pagina n (pin) e soltar(n, 0) a libera. A varredura
  *                e' somente de leitura, entao a pagina nunca e' marcada como suja.
- *   page    -> total_paginas_alocadas() e desserializar_registro() (bytes -> Registro).
- *   row       -> row_de_registro() monta a tupla logica a partir do Registro fisico.
+ *   Pager     -> total_paginas_alocadas() e desserializar_registro() (bytes -> Registro).
+ *   Row       -> row_de_registro() monta a tupla logica a partir do Registro fisico.
  *
- * Layout de uma folha (definido por b_plus_tree.c, serializar_no):
+ * Layout de uma folha (definido por BPlusTree.c, serializar_no):
  *
  *   [ 0.. 3] tipo (NO_FOLHA)   [ 4.. 7] numero_chaves (slots ocupados, 0..MAX_CHAVES)
  *   [ 8..11] proxima folha ou SEM_PAGINA (-1)          [12..15] reservado
@@ -35,7 +35,7 @@
  *   abrir : raiz -> desce por filhos[0] (sem manter pin) -> guarda a 1a folha
  *   next  : fixar(folha) ; para cada slot 0..MAX_CHAVES-1:
  *               livre  -> ignora
- *               valido -> desserializa, monta a row, devolve
+ *               valido -> desserializa, monta a Row, devolve
  *           esgotados os slots: soltar(folha, 0) e segue para 'proxima'
  *           proxima == SEM_PAGINA -> fim da varredura
  *
@@ -44,11 +44,11 @@
  * table_scan_fechar(). Enquanto uma varredura estiver parada no meio de uma folha,
  * o cache nao pode ser reiniciado (reiniciar_cache() recusa paginas fixadas) -
  * portanto, feche a varredura antes de inserir/buscar em outra tabela. Use UMA
- * varredura ativa por vez: o page trabalha com um unico arquivo corrente.
+ * varredura ativa por vez: o Pager trabalha com um unico arquivo corrente.
  *
  * ORDEM: crescente da chave (id), a mesma de row_percorrer().
  *
- * Convencao de retorno (igual ao page/cache): erros em stderr.
+ * Convencao de retorno (igual ao Pager/Cache): erros em stderr.
  *   table_scan_abrir / table_scan_fechar : 0 = sucesso, -1 = erro
  *   table_scan_next                     : 1 = tupla entregue, 0 = fim da varredura, -1 = erro
  */
@@ -56,12 +56,11 @@
 #ifndef TABLE_SCAN
 #define TABLE_SCAN
 
-/* row.c ja inclui page.c, cache.c, b_plus_tree.c e catalog.c (que traz o parser).
-   ROW_SEM_MAIN desliga o main de demonstracao de row.c, para nao colidir com o
-   main deste arquivo. */
-#define ROW_SEM_MAIN
+/* row.c ja inclui page.c, cache.c, b_plus_tree.c e catalog.c (que traz o Parser).
+   O main de demonstracao so existe com -DTABLE_SCAN_MAIN (e o de row.c so com
+   -DROW_MAIN), entao nao ha conflito de main. */
 #include "../row/row.c"
-#undef ROW_SEM_MAIN
+
 /* Offsets do cabecalho da folha (espelham serializar_no/desserializar_no) */
 #define SCAN_OFFSET_TIPO            0
 #define SCAN_OFFSET_NUM_REGISTROS   4
@@ -194,8 +193,8 @@ static int table_scan_abrir_proxima_pagina(TableScan *scan) {
 
 /*
  table_scan_abrir(scan, cat, nome_tabela)
- Prepara a varredura da tabela 'nome_tabela': consulta o catalogo, aponta a
- page para o arquivo de dados da tabela, le a raiz nos metadados e localiza a
+ Prepara a varredura da tabela 'nome_tabela': consulta o catalogo, aponta o
+ Pager para o arquivo de dados da tabela, le a raiz nos metadados e localiza a
  primeira folha. Nenhuma pagina fica fixada ate a primeira chamada de table_scan_next().
  O Catalogo deve continuar existindo (e nao ser movido) ate table_scan_fechar().
  Retorna 0 em caso de sucesso, ou -1 em caso de erro.
@@ -309,6 +308,8 @@ int table_scan_fechar(TableScan *scan) {
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
+#ifdef TABLE_SCAN_MAIN
+
 /* Callback de row_percorrer: guarda os ids visitados, para conferir com o scan. */
 typedef struct { int32_t ids[64]; int n; } ListaIds;
 
@@ -320,7 +321,6 @@ static int coletar_id_cb(const Row *row, void *arg) {
     return 0;
 }
 
-#ifndef TABLE_SCAN_SEM_MAIN
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -421,6 +421,6 @@ int main(void) {
     return 0;
 }
 
-#endif /* TABLE_SCAN_SEM_MAIN */
+#endif /* TABLE_SCAN_MAIN */
 
 #endif /* TABLE_SCAN */

@@ -6,12 +6,12 @@
  *
  * Nos suportados:
  *   - EXPR_LITERAL    : devolve o valor embutido no no.
- *   - EXPR_COLUNA     : busca o valor da coluna na row (por nome).
+ *   - EXPR_COLUNA     : busca o valor da coluna na Row (por nome).
  *   - EXPR_COMPARACAO : avalia os dois filhos e compara (=, <>, <, <=, >, >=),
  *                       produzindo um Value do tipo VALOR_BOOL.
  *
  * Isolamento do armazenamento fisico:
- *   O avaliador so conhece a row (representacao LOGICA da linha) e usa apenas a
+ *   O avaliador so conhece a Row (representacao LOGICA da linha) e usa apenas a
  *   sua API publica (row_posicao_da_coluna, row_tipo_da_coluna, row_obter_int,
  *   row_obter_char). Nao ha acesso a paginas, cache, arvore B+ ou registros de
  *   8 bytes. Trocar o formato de armazenamento nao afeta este modulo.
@@ -20,9 +20,9 @@
  *   - INT   compara com INT   (comparacao numerica).
  *   - CHAR  compara com CHAR  (strcmp, sensivel a maiusculas/minusculas).
  *   - INT contra CHAR e' erro de tipo; nao ha conversao implicita.
- *   - Nomes de coluna nao diferenciam maiusculas/minusculas (regra da row).
+ *   - Nomes de coluna nao diferenciam maiusculas/minusculas (regra da Row).
  *
- * Convencao de retorno (igual a da row): 0 = sucesso, -1 = erro.
+ * Convencao de retorno (igual a da Row): 0 = sucesso, -1 = erro.
  * A mensagem do erro fica em Avaliador.mensagem.
  *
  * Ciclo de vida dos nos: o chamador e' dono dos nos (sem malloc); os filhos de
@@ -38,10 +38,8 @@
 #include <string.h>
 
 #include "../../parser/parser.c"
+#include "../row/row.c"      /* o main de row.c so existe com -DROW_MAIN */
 
-#define main ROW_SEM_MAIN
-#include "../row/row.c"
-#undef main
 /* ------------------------------------------------------------------ */
 /* Value: resultado tipado de uma expressao                            */
 /* ------------------------------------------------------------------ */
@@ -206,7 +204,7 @@ static const char *simbolo_comparacao(TipoToken op)
     return simbolo_operacao(op);    /* definido no Parser */
 }
 
-/* Coluna -> Value, lendo apenas pela API logica da row. */
+/* Coluna -> Value, lendo apenas pela API logica da Row. */
 static int avaliar_coluna(Avaliador *av, const Expressao *expr, const Row *row, Value *saida)
 {
     TipoToken tipo;
@@ -276,7 +274,7 @@ static int comparar_valores(Avaliador *av, TipoToken op, const Value *a, const V
  avaliar_expressao(av, expr, row, saida)
  Identifica o tipo do no e o avalia:
    literal    -> o proprio valor
-   coluna     -> o valor da coluna na row
+   coluna     -> o valor da coluna na Row
    comparacao -> BOOL com o resultado de esquerda <op> direita
  'row' pode ser NULL apenas se a expressao nao referenciar colunas.
  Retorna 0 em sucesso, -1 em erro (mensagem em av->mensagem).
@@ -295,7 +293,7 @@ static int avaliar_expressao(Avaliador *av, const Expressao *expr, const Row *ro
 
         case EXPR_COLUNA:
             if (row == NULL)
-                return av_erro(av, "coluna '%s' referenciada sem uma row", expr->coluna);
+                return av_erro(av, "coluna '%s' referenciada sem uma Row", expr->coluna);
             return avaliar_coluna(av, expr, row, saida);
 
         case EXPR_COMPARACAO: {
@@ -340,10 +338,12 @@ static int avaliar_where(Avaliador *av, const Comando *comando, const Row *row, 
 }
 
 /* ------------------------------------------------------------------ */
-/* Demonstracao (compile com -DEXPRESSION_EVALUATOR_SEM_MAIN)              */
+/* Demonstracao (compile com -DEXPRESSION_EVALUATOR_MAIN)              */
 /* ------------------------------------------------------------------ */
 
-/* Monta a row na mao: o avaliador nao precisa de catalogo nem de disco. */
+#ifdef EXPRESSION_EVALUATOR_MAIN
+
+/* Monta a Row na mao: o avaliador nao precisa de catalogo nem de disco. */
 static void demo_campo(Row *row, const char *nome, TipoToken tipo, int32_t inteiro, const char *texto)
 {
     CampoRow *c = &row->campos[row->numero_campos++];
@@ -376,7 +376,7 @@ static void demo_where(const Row *row, const char *sql)
     else
         printf("%-58s -> %s\n", sql, ok ? "verdadeiro" : "falso");
 }
-#ifdef EXPRESSION_EVALUATOR_SEM_MAIN
+
 int main(void)
 {
     Row       row;
@@ -422,7 +422,8 @@ int main(void)
     demo_where(&row, "SELECT * FROM alunos;");
     demo_where(&row, "SELECT * FROM alunos WHERE id = 'abc';");
     return 0;
-
 }
-#endif /*EXPRESSION_EVALUATOR_SEM_MAIN*/
+
+#endif /* EXPRESSION_EVALUATOR_MAIN */
+
 #endif /* EXPRESSION_EVALUATOR */

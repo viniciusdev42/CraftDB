@@ -2,41 +2,40 @@
  *                 QUERY EXECUTOR (EXECUTOR DE CONSULTAS)
  * ============================================================
  *
- * Executa um SELECT ja analisado pelo parser e devolve um query_result.
+ * Executa um SELECT ja analisado pelo Parser e devolve um QueryResult.
  *
  * Pipeline (um passo por modulo, cada um com UMA responsabilidade):
  *
- *   Comando (AST do parser)
+ *   Comando (AST do Parser)
  *      |
- *      |  1) validar_consulta()          query_validator.c
+ *      |  1) validar_consulta()          QueryValidator.c
  *      |       tabela, colunas, operadores e tipos dos literais conferidos
  *      |       contra o catalogo; nada e' lido do disco se a consulta for invalida
  *      v
  *   ConsultaValidada
  *      |
- *      |  2) qr_iniciar()                query_result.c
+ *      |  2) qr_iniciar()                QueryResult.c
  *      |       cria o resultado com os metadados das colunas projetadas
- *      |  3) table_scan_abrir()          table_scan
-.c
+ *      |  3) table_scan_abrir()          TableScan.c
  *      |       abre a varredura sequencial da tabela
  *      v
- *   +--> 4) table_scan_next()            table_scan.c  -> row (tupla logica)
+ *   +--> 4) table_scan_next()            TableScan.c  -> Row (tupla logica)
  *   |       |
- *   |       |  5) linha_permanece_where()  predicate_evaluator.c
+ *   |       |  5) linha_permanece_where()  PredicateEvaluator.c
  *   |       |       avalia o WHERE; erro de avaliacao aborta a consulta
  *   |       |
  *   |       +-- resultado != TRUE -> 6) descarta a linha, volta ao passo 4
  *   |       |
- *   |       |  7) qr_adicionar_row()       query_result.c
+ *   |       |  7) qr_adicionar_row()       QueryResult.c
  *   |       |       aplica a projecao de colunas (ordem pedida) e acrescenta
  *   |       |       a linha projetada ao resultado
  *   +-------+
  *      |
  *      |  8) table_scan_fechar()         (sempre, inclusive em caso de erro)
  *      v
- *   query_result
+ *   QueryResult
  *
- * Projecao: a gramatica do parser so aceita SELECT '*', entao a AST nao carrega
+ * Projecao: a gramatica do Parser so aceita SELECT '*', entao a AST nao carrega
  * lista de colunas. A projecao e' um parametro do executor (nomes + quantidade);
  * NULL / 0 equivale a SELECT * (todas as colunas, na ordem do catalogo). Os
  * nomes sao validados contra o catalogo ANTES da varredura.
@@ -51,39 +50,25 @@
  *   A mensagem do erro fica em Executor.mensagem.
  *
  * ------------------------------------------------------------
- * ATENCAO - blocos main dos modulos incluidos
+ * Blocos main dos modulos incluidos
  * ------------------------------------------------------------
- * expression_evaluator.c, predicate_evaluator.c e query_result.c definem um main()
- * sem protecao, e o proprio '#define main ...' / '#undef main' interno deles
- * impede que este arquivo renomeie esses mains de fora. Para incluir os tres
- * neste arquivo, proteja cada main com a macro abaixo (uma linha antes de
- * "int main(void)" e um "#endif" logo apos a "}" que o fecha):
+ * Todos os modulos tem o main de demonstracao DESLIGADO por padrao; cada um so
+ * e' compilado com a sua propria macro (-DROW_MAIN, -DTABLE_SCAN_MAIN,
+ * -DEXPRESSION_EVALUATOR_MAIN, -DPREDICATE_EVALUATOR_MAIN, -DQUERY_RESULT_MAIN,
+ * -DVALIDATOR_MAIN). Assim este arquivo pode incluir todos sem conflito de main.
  *
- *     expression_evaluator.c  ->  #ifdef EXPRESSION_EVALUATOR_MAIN
- *     predicate_evaluator.c   ->  #ifdef PREDICATE_EVALUATOR_MAIN
- *     query_result.c          ->  #ifdef QUERY_RESULT_MAIN
- *
- * (o cabecalho do expression_evaluator.c ja menciona -DEXPRESSION_EVALUATOR_MAIN).
- * query_validator.c e table_scan.c ja tem essa protecao (MAIN_VALIDATOR e
- * TABLE_SCAN_MAIN) e sao tratados logo abaixo.
- *
- * Compilacao:   gcc -Wall -Wextra -o executor query_executor.c
- * Para usar este arquivo como biblioteca (sem o main do final):
- *               -DQUERY_EXECUTOR_SEM_MAIN
+ * Compilacao (a partir da raiz do projeto; os includes sao relativos a src/):
+ *   gcc -Wall -Wextra -Isrc -DQUERY_EXECUTOR_MAIN -o executor src/query/query_executor.c
+ * Para usar este arquivo como biblioteca, compile sem -DQUERY_EXECUTOR_MAIN.
  */
 
 #ifndef QUERY_EXECUTOR
 #define QUERY_EXECUTOR
 
-/* Define as macros ANTES do include: o bloco main do validador e o do scan
-   ficam desligados. */
-#define MAIN_VALIDATOR
-#define TABLE_SCAN_MAIN
-
-#include "../validator/query_validator.c"      /* catalog.c + parser.c + validar_consulta()  */
-#include "../scan/table_scan.c"                /* row.c (sem main) + table_scan               */
-#include "../evaluator/predicate_evaluator.c"  /* expression_evaluator.c + linha_permanece_*  */
-#include "../result/query_result.c"         /* query_result + qr_adicionar_row()           */
+#include "../validator/query_validator.c"      /* catalog.c + parser.c + validar_consulta() */
+#include "../scan/table_scan.c"           /* row.c + TableScan                         */
+#include "../evaluator/predicate_evaluator.c"  /* expression_evaluator.c + linha_permanece_* */
+#include "../result/query_result.c"         /* QueryResult + qr_adicionar_row()          */
 
 /* ------------------------------------------------------------------ */
 /* Estado do executor                                                  */
@@ -227,10 +212,10 @@ static int executor_varrer(Executor *ex, Catalogo *cat, const Comando *comando,
  Executa o SELECT 'comando' sobre o catalogo 'cat'.
    projecao / n_projecao : colunas a devolver, NESSA ORDEM (nomes sem diferenciar
                            maiusculas/minusculas). NULL ou 0 = todas (SELECT *).
-   resultado             : recebe o query_result; o chamador deve chama-lo
+   resultado             : recebe o QueryResult; o chamador deve chama-lo
                            qr_liberar() depois de consumi-lo.
 
- O catalogo deve continuar existindo (e nao ser movido) durante a chamada.
+ O Catalogo deve continuar existindo (e nao ser movido) durante a chamada.
  Retorna o numero de linhas do resultado (>= 0), ou -1 em caso de erro, com a
  mensagem em ex->mensagem e *resultado zerado.
 */
@@ -273,6 +258,9 @@ static int executar_consulta(Executor *ex, Catalogo *cat, const Comando *comando
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
+/* O main de demonstracao so existe com -DQUERY_EXECUTOR_MAIN. */
+#ifdef QUERY_EXECUTOR_MAIN
+
 /* Parseia 'sql', executa e imprime o resultado ou o erro. */
 static void demo_consulta(Executor *ex, Catalogo *cat, const char *sql,
                           const char *const *projecao, int n_projecao)
@@ -306,7 +294,7 @@ static void demo_consulta(Executor *ex, Catalogo *cat, const char *sql,
            ex->linhas_varridas, ex->linhas_descartadas, qr_numero_linhas(&resultado));
     qr_liberar(&resultado);
 }
-#ifdef QUERY_EXECUTOR_SEM_MAIN
+
 int main(void)
 {
     static Catalogo cat;
@@ -375,6 +363,6 @@ int main(void)
     return 0;
 }
 
-#endif /* QUERY_EXECUTOR_SEM_MAIN */
+#endif /* QUERY_EXECUTOR_MAIN */
 
 #endif /* QUERY_EXECUTOR */

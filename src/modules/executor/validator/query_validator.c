@@ -28,18 +28,23 @@
  *   - Toda consulta invalida e rejeitada aqui. Se validar_consulta devolver
  *     0, a saida fica zerada (valida == 0) e nada deve ser executado.
  *
- * Acoplamento: este arquivo inclui catalog.c (que inclui parser.c e este,
- * por sua vez, o tokenizer.c) e reutiliza as mesmas regras do catalogo
+ * Acoplamento: este arquivo inclui catalog.c (que inclui parser.c) e
+ * reutiliza as mesmas regras do catalogo
  * (catalogo_adicionar_tabela, valor_compativel, tabela_buscar_coluna ...),
  * de modo que o validador e o catalogo nunca discordem.
  *
- * Uso (o main no final do arquivo faz apenas simulacao, nada e gravado):
+ * Uso (compile com -Isrc -DVALIDATOR_MAIN; o main faz apenas simulacao, nada
+ * e gravado):
  *   ./validador                      valida um exemplo embutido
  *   ./validador script.sql           valida os comandos do arquivo
  *   ./validador script.sql meu.cat   parte do catalogo gravado em meu.cat
  */
 
+#ifndef QUERY_VALIDATOR
+#define QUERY_VALIDATOR
+
 #include "../../catalog/catalog.c"
+
 /* ------------------------------------------------------------------ */
 /* Representacao validada                                              */
 /* ------------------------------------------------------------------ */
@@ -393,8 +398,8 @@ static void imprimir_consulta_validada(const ConsultaValidada *q)
 /* Bloco main (simulacao: valida, mas nunca executa nem grava)         */
 /* ------------------------------------------------------------------ */
 
-#ifndef VALIDATOR_MAIN
-#define VALIDATOR_MAIN
+/* O programa de simulacao so existe com -DVALIDATOR_MAIN. */
+#ifdef VALIDATOR_MAIN
 
 static const char EXEMPLO[] =
     "CREATE TABLE alunos (id INT, nome CHAR);\n"
@@ -475,37 +480,27 @@ static int processar_script(Catalogo *cat, const char *texto)
 
 int main(int argc, char **argv)
 {
-    static Catalogo cat;            /* grande: fora da pilha */
-    const char *script  = (argc > 1) ? argv[1] : NULL;
-    const char *arq_cat = (argc > 2) ? argv[2] : NULL;
+    static Catalogo cat;
+    const char *caminho_catalogo = (argc > 2) ? argv[2] : ARQUIVO_CATALOGO;
     char *texto = NULL;
-    int rejeitados;
 
-    catalogo_iniciar(&cat);
-
-    if (arq_cat) {
-        int r = catalogo_carregar(&cat, arq_cat);
-        if (r < 0) {
-            fprintf(stderr, "Catalogo invalido '%s': %s\n", arq_cat, cat.mensagem);
-            return 2;
-        }
-        if (r == 0)
-            printf("Arquivo de catalogo '%s' nao existe: partindo de catalogo vazio.\n",
-                   arq_cat);
+    if (catalogo_carregar(&cat, caminho_catalogo) < 0) {
+        fprintf(stderr, "Catalogo invalido: %s\n", cat.mensagem);
+        return 1;
     }
-
-    if (script) {
-        texto = ler_arquivo(script);
+    if (argc > 1) {
+        texto = ler_arquivo(argv[1]);
         if (!texto) {
-            fprintf(stderr, "Nao foi possivel ler '%s'.\n", script);
-            return 2;
+            fprintf(stderr, "Nao foi possivel ler '%s'\n", argv[1]);
+            return 1;
         }
     }
 
-    rejeitados = processar_script(&cat, texto ? texto : EXEMPLO);
+    int rejeitados = processar_script(&cat, texto ? texto : EXEMPLO);
     free(texto);
-
-    return rejeitados ? 1 : 0;
+    return rejeitados > 0 ? 1 : 0;
 }
 
 #endif /* VALIDATOR_MAIN */
+
+#endif /* QUERY_VALIDATOR */

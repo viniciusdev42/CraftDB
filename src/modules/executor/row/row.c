@@ -23,10 +23,14 @@
 #ifndef ROW
 #define ROW
 
-#include "../../storage/page.c"
-#include "../../storage/cache.c"
-#include "../../index/b_plus_tree.c"
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+/* Caminhos a partir de src/ (compile com -Isrc). catalog.c ja inclui storage,
+   index e parser. */
 #include "../../catalog/catalog.c"
+
 /* ------------------------------------------------------------------ */
 /* Estruturas                                                          */
 /* ------------------------------------------------------------------ */
@@ -449,13 +453,15 @@ void row_imprimir(const Row *row) {
 /* Demonstracao                                                        */
 /* ------------------------------------------------------------------ */
 
+/* O main so existe com -DROW_MAIN (os outros modulos incluem este arquivo). */
+#ifdef ROW_MAIN
 static int imprime_linha_cb(const Row *row, void *arg) {
     (void)arg;
     printf("  ");
     row_imprimir(row);
     return 0;
 }
-#ifndef ROW_SEM_MAIN
+
 int main(void) {
     static Catalogo cat;
     Coluna colunas[2];
@@ -524,6 +530,6 @@ int main(void) {
     return 0;
 }
 
-#endif /* ROW_SEM_MAIN */
+#endif /* ROW_MAIN */
 
 #endif /* ROW */
