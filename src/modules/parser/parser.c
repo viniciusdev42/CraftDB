@@ -6,10 +6,13 @@
  * Gramatica (palavras reservadas sem diferenciar maiusculas/minusculas):
  *
  *   programa   ::= { comando }  FINAL
- *   comando    ::= create | insert | select
+ *   comando    ::= create | create_idx | insert | select
  *
  *   create     ::= CREATE TABLE IDENT '(' coluna { ',' coluna } ')' ';'
  *   coluna     ::= IDENT ( INT | CHAR )
+ *
+ *   create_idx ::= CREATE INDEX IDENT ON IDENT '(' IDENT ')' ';'
+ *                  (nome do indice, nome da tabela, nome da coluna)
  *
  *   insert     ::= INSERT INTO IDENT VALUES '(' valor { ',' valor } ')' ';'
  *
@@ -49,6 +52,7 @@
 
 typedef enum {
     CMD_CREATE,
+    CMD_CREATE_INDEX,
     CMD_INSERT,
     CMD_SELECT
 } TipoComando;
@@ -73,6 +77,9 @@ typedef struct {
 typedef struct {
     TipoComando tipo;
     char        tabela[MAX_LEXEMA];
+
+    char        indice[MAX_LEXEMA];         /* CREATE INDEX: nome do indice  */
+    char        coluna_indice[MAX_LEXEMA];  /* CREATE INDEX: coluna indexada */
 
     Coluna      colunas[MAX_COLUNAS];       /* CREATE TABLE             */
     int         numero_colunas;
@@ -214,16 +221,41 @@ static int parse_valor(Parser *parser, Valor *valor)
     return 1;
 }
 
+/* CREATE INDEX IDENT ON IDENT '(' IDENT ')' ';'
+ * (o token CREATE ja foi consumido por parse_create; atual == INDEX) */
+static int parse_create_index(Parser *parser, Comando *comando)
+{
+    Token token;
+
+    comando->tipo = CMD_CREATE_INDEX;
+    avancar_parser(parser);                                   /* INDEX */
+
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome do indice", &token)) return 0;
+    strcpy(comando->indice, token.lexema);
+    if (!consumir_token(parser, TOKEN_ON, "ON", NULL))                      return 0;
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da tabela", &token)) return 0;
+    strcpy(comando->tabela, token.lexema);
+    if (!consumir_token(parser, TOKEN_ABRE_PARENTESE, "'('", NULL))         return 0;
+    if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da coluna", &token)) return 0;
+    strcpy(comando->coluna_indice, token.lexema);
+    if (!consumir_token(parser, TOKEN_FECHA_PARENTESE, "')'", NULL))        return 0;
+    if (!consumir_token(parser, TOKEN_PONTO_VIRGULA, "';'", NULL))          return 0;
+    return 1;
+}
+
 /* CREATE TABLE IDENT '(' coluna { ',' coluna } ')' ';'
  * (o token CREATE ja foi verificado por parse_comando) */
 static int parse_create(Parser *parser, Comando *comando)
 {
     Token token;
 
-    comando->tipo = CMD_CREATE;
     avancar_parser(parser);                                   /* CREATE */
 
-    if (!consumir_token(parser, TOKEN_TABLE, "TABLE", NULL))  return 0;
+    if (parser->atual.tipo == TOKEN_INDEX)
+        return parse_create_index(parser, comando);
+
+    comando->tipo = CMD_CREATE;
+    if (!consumir_token(parser, TOKEN_TABLE, "TABLE ou INDEX", NULL))  return 0;
     if (!consumir_token(parser, TOKEN_IDENTACAO, "nome da tabela", &token))  return 0;
     strcpy(comando->tabela, token.lexema);
     if (!consumir_token(parser, TOKEN_ABRE_PARENTESE, "'('", NULL)) return 0;
@@ -405,6 +437,13 @@ static void imprimir_comando(const Comando *comando)
             for (int i = 0; i < comando->numero_colunas; i++)
                 printf("    - %s : %s\n", comando->colunas[i].nome,
                        nome_token(comando->colunas[i].tipo));
+            break;
+
+        case CMD_CREATE_INDEX:
+            printf("CREATE INDEX\n");
+            printf("  indice : %s\n", comando->indice);
+            printf("  tabela : %s\n", comando->tabela);
+            printf("  coluna : %s\n", comando->coluna_indice);
             break;
 
         case CMD_INSERT:

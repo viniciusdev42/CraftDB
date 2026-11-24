@@ -3,6 +3,7 @@
  *
  * Comandos reconhecidos:
  *   CREATE TABLE nome (coluna INT, coluna CHAR, ...);
+ *   CREATE INDEX nome_indice ON nome_tabela (coluna);
  *   INSERT INTO nome VALUES (10, 'abc');
  *   SELECT * FROM nome WHERE coluna = 10 AND outra <> 'x';
  *
@@ -42,6 +43,8 @@ typedef enum {
     TOKEN_FROM,
     TOKEN_WHERE,
     TOKEN_AND,
+    TOKEN_INDEX,
+    TOKEN_ON,
 
     /* Tipos de dados */
     TOKEN_INT,
@@ -86,6 +89,8 @@ static const char *nome_token(TipoToken token)
         case TOKEN_FROM:            return "FROM";
         case TOKEN_WHERE:           return "WHERE";
         case TOKEN_AND:             return "AND";
+        case TOKEN_INDEX:           return "INDEX";
+        case TOKEN_ON:              return "ON";
         case TOKEN_INT:             return "INT";
         case TOKEN_CHAR:            return "CHAR";
         case TOKEN_IDENTACAO:       return "IDENT";
@@ -146,13 +151,13 @@ static const Reservada RESERVADAS[] = {
     { "VALUES", TOKEN_VALUES }, { "SELECT", TOKEN_SELECT },
     { "FROM",   TOKEN_FROM   }, { "WHERE",  TOKEN_WHERE  },
     { "AND",    TOKEN_AND    },
+    { "INDEX",  TOKEN_INDEX  }, { "ON",     TOKEN_ON     },
     { "INT",    TOKEN_INT    }, { "CHAR",   TOKEN_CHAR   },
 
     /* fora do escopo: OR, juncao, ORDER BY, agregacao, GROUP BY */
     { "OR",     TOKEN_NAO_SUPORTADO },
     { "JOIN",   TOKEN_NAO_SUPORTADO }, { "INNER",  TOKEN_NAO_SUPORTADO },
     { "LEFT",   TOKEN_NAO_SUPORTADO }, { "RIGHT",  TOKEN_NAO_SUPORTADO },
-    { "ON",     TOKEN_NAO_SUPORTADO },
     { "ORDER",  TOKEN_NAO_SUPORTADO }, { "BY",     TOKEN_NAO_SUPORTADO },
     { "GROUP",  TOKEN_NAO_SUPORTADO }, { "HAVING", TOKEN_NAO_SUPORTADO },
     { "COUNT",  TOKEN_NAO_SUPORTADO }, { "SUM",    TOKEN_NAO_SUPORTADO },

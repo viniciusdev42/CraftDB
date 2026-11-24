@@ -10,6 +10,8 @@
  *   texto SQL -> Tokenizer -> Parser (AST) -> CATALOGO (analise semantica)
  *
  *   CREATE TABLE : registra a tabela no catalogo (e grava em disco)
+ *   CREATE INDEX : registra o indice no catalogo e inicializa sua arvore B+
+ *                  (um arquivo "nome_do_indice.idx" por indice)
  *   INSERT       : confere tabela, quantidade e tipos dos valores
  *   SELECT       : confere tabela, colunas do WHERE e tipos dos literais
  *
@@ -59,6 +61,7 @@
 /* ------------------------------------------------------------------ */
 
 #define MAX_TABELAS       32                /* tabelas no catalogo          */
+#define MAX_INDICES       32                /* indices no catalogo          */
 #define TAM_INT           4                 /* bytes de uma coluna INT      */
 #define TAM_CHAR          4                 /* bytes de uma coluna CHAR     */
 #define TAM_ARQUIVO       (MAX_LEXEMA + 5)  /* "nome" + ".dat" + '\0'       */
@@ -87,9 +90,21 @@ typedef struct {
     int       tamanho_registro;     /* sempre TAM_REGISTRO                  */
 } TabelaCat;
 
+/* Metadados de um indice B+ (a arvore em si fica no arquivo do indice) */
+typedef struct {
+    char nome[MAX_LEXEMA];          /* nome do indice (unico no catalogo)   */
+    char tabela[MAX_LEXEMA];        /* tabela indexada                      */
+    char coluna[MAX_LEXEMA];        /* coluna indexada                      */
+    int  indice_coluna;             /* posicao da coluna na tabela          */
+    TipoToken tipo_chave;           /* tipo da coluna indexada (INT/CHAR)   */
+    char arquivo[TAM_ARQUIVO];      /* arquivo da arvore B+ (nome.idx)      */
+} IndiceCat;
+
 typedef struct {
     TabelaCat tabelas[MAX_TABELAS];
     int       numero_tabelas;
+    IndiceCat indices[MAX_INDICES];
+    int       numero_indices;
     char      mensagem[MAX_MESSAGEM];   /* ultimo erro semantico            */
 } Catalogo;
 
@@ -220,6 +235,142 @@ static int catalogo_adicionar_tabela(Catalogo *cat, const char *nome,
     nova.tamanho_registro = TAM_REGISTRO;
 
     cat->tabelas[cat->numero_tabelas++] = nova;
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Indices (CREATE INDEX)                                              */
+/* ------------------------------------------------------------------ */
+
+/* "Idx_Nome" -> "idx_nome.idx" */
+static void montar_nome_arquivo_indice(char *saida, const char *indice)
+{
+    size_t i = 0;
+    for (; indice[i] && i < MAX_LEXEMA - 1; i++)
+        saida[i] = (char)tolower((unsigned char)indice[i]);
+    saida[i] = '\0';
+    strcat(saida, ".idx");
+}
+
+static const IndiceCat *catalogo_buscar_indice(const Catalogo *cat, const char *nome)
+{
+    for (int i = 0; i < cat->numero_indices; i++)
+        if (contexto_igual(cat->indices[i].nome, nome))
+            return &cat->indices[i];
+    return NULL;
+}
+
+/*
+ * Valida e registra os METADADOS de um indice (sem tocar em disco). E o
+ * unico ponto de entrada de novos indices: usado tanto por
+ * catalogo_criar_indice quanto ao carregar o arquivo do catalogo.
+ */
+static int catalogo_registrar_indice(Catalogo *cat, const char *nome_tabela,
+                                     const char *nome_indice, const char *nome_coluna)
+{
+    const TabelaCat *tabela;
+    IndiceCat novo;
+    int posicao;
+
+    if (!nome_valido(nome_indice) || strlen(nome_indice) >= MAX_LEXEMA)
+        return erro_cat(cat, "nome de indice invalido '%s'", nome_indice);
+    if (catalogo_buscar_indice(cat, nome_indice))
+        return erro_cat(cat, "indice '%s' ja existe", nome_indice);
+    if (cat->numero_indices >= MAX_INDICES)
+        return erro_cat(cat, "numero maximo de indices (%d) excedido", MAX_INDICES);
+
+    tabela = catalogo_buscar_tabela(cat, nome_tabela);
+    if (!tabela)
+        return erro_cat(cat, "tabela '%s' nao existe", nome_tabela);
+
+    posicao = tabela_buscar_coluna(tabela, nome_coluna);
+    if (posicao < 0)
+        return erro_cat(cat, "coluna '%s' nao existe na tabela '%s'",
+                        nome_coluna, tabela->nome);
+
+    for (int i = 0; i < cat->numero_indices; i++)
+        if (contexto_igual(cat->indices[i].tabela, tabela->nome) &&
+            cat->indices[i].indice_coluna == posicao)
+            return erro_cat(cat, "a coluna '%s' da tabela '%s' ja possui o indice '%s'",
+                            tabela->colunas[posicao].nome, tabela->nome,
+                            cat->indices[i].nome);
+
+    memset(&novo, 0, sizeof novo);
+    strcpy(novo.nome, nome_indice);
+    strcpy(novo.tabela, tabela->nome);                     /* grafia do catalogo */
+    strcpy(novo.coluna, tabela->colunas[posicao].nome);
+    novo.indice_coluna = posicao;
+    novo.tipo_chave    = tabela->colunas[posicao].tipo;
+    montar_nome_arquivo_indice(novo.arquivo, nome_indice);
+
+    cat->indices[cat->numero_indices++] = novo;
+    return 1;
+}
+
+/*
+ * Prepara a arvore B+ de um indice RECEM-CRIADO.
+ *
+ * O Pager trabalha com um unico arquivo por vez e o cache nao sabe de qual
+ * arquivo veio cada frame; por isso o cache e' descarregado/reiniciado ANTES
+ * de configurar_arquivo() (mesma ordem de selecionar_arquivo_tabela).
+ *
+ * inicializar_arvore() reaproveita qualquer arquivo que ja tenha paginas. Como
+ * o catalogo ainda nao conhecia este indice, um .idx pre-existente so pode ser
+ * lixo (ex.: execucao anterior interrompida antes de salvar o catalogo); ele e'
+ * apagado para a arvore comecar vazia.
+ */
+static int preparar_arvore_indice(Catalogo *cat, const IndiceCat *indice)
+{
+    if (reiniciar_cache() != 0)
+        return erro_cat(cat, "nao foi possivel descarregar/reiniciar a cache");
+    if (configurar_arquivo(indice->arquivo) != 0)
+        return erro_cat(cat, "arquivo do indice '%s' invalido", indice->nome);
+    if (total_paginas_alocadas() > 0 && remove(indice->arquivo) != 0)
+        return erro_cat(cat, "nao foi possivel recriar o arquivo '%s'", indice->arquivo);
+    if (inicializar_arvore() != 0)
+        return erro_cat(cat, "nao foi possivel inicializar a arvore B+ do indice '%s'",
+                        indice->nome);
+    return 1;
+}
+
+/* Desfaz o ultimo registro de indice: esvazia o cache, apaga o arquivo e remove os metadados */
+static void desfazer_ultimo_indice(Catalogo *cat)
+{
+    reiniciar_cache();
+    remove(cat->indices[cat->numero_indices - 1].arquivo);
+    cat->numero_indices--;
+}
+
+/*
+ * CREATE INDEX nome_indice ON nome_tabela (nome_coluna)
+ *
+ *   1. verifica se a tabela e a coluna existem (e se o nome do indice e livre);
+ *   2. registra os metadados do indice no catalogo;
+ *   3. inicializa a estrutura da arvore B+ do indice (pagina 0 de metadados +
+ *      raiz folha vazia) no arquivo proprio do indice e a grava em disco.
+ *
+ * Se qualquer passo de disco falhar, o registro e o arquivo sao desfeitos.
+ * Devolve 1 = ok, 0 = erro (ver cat->mensagem). Para persistir os metadados
+ * no arquivo do catalogo, chame catalogo_salvar depois.
+ */
+int catalogo_criar_indice(Catalogo *cat, const char *nome_tabela,
+                          const char *nome_indice, const char *nome_coluna)
+{
+    IndiceCat *novo;
+
+    if (!catalogo_registrar_indice(cat, nome_tabela, nome_indice, nome_coluna))
+        return 0;
+    novo = &cat->indices[cat->numero_indices - 1];
+
+    if (!preparar_arvore_indice(cat, novo)) {
+        desfazer_ultimo_indice(cat);
+        return 0;
+    }
+    if (descarregar_todo_cache() != 0 || sincronizar_dados() != 0) {
+        erro_cat(cat, "falha ao persistir estrutura do indice '%s'", novo->nome);
+        desfazer_ultimo_indice(cat);
+        return 0;
+    }
     return 1;
 }
 
@@ -434,6 +585,8 @@ static int catalogo_executar(Catalogo *cat, const Comando *cmd)
                 return erro_cat(cat, "falha ao persistir estrutura da tabela '%s'", t->nome);
             return 1;
         }
+        case CMD_CREATE_INDEX:
+            return catalogo_criar_indice(cat, cmd->tabela, cmd->indice, cmd->coluna_indice);
         case CMD_INSERT:
             return catalogo_executar_insert(cat, cmd);
         case CMD_SELECT:
@@ -470,6 +623,14 @@ static void catalogo_imprimir(const Catalogo *cat)
         if (i + 1 < cat->numero_tabelas)
             printf("\n");
     }
+
+    if (cat->numero_indices > 0) {
+        printf("\n=== INDICES (%d) ===\n", cat->numero_indices);
+        for (int i = 0; i < cat->numero_indices; i++) {
+            const IndiceCat *x = &cat->indices[i];
+            printf("  %s: %s(%s)  (arquivo: %s)\n", x->nome, x->tabela, x->coluna, x->arquivo);
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -481,6 +642,8 @@ static void catalogo_imprimir(const Catalogo *cat)
 /*   TABELA alunos 2                                                   */
 /*   COLUNA id INT                                                     */
 /*   COLUNA nome CHAR                                                  */
+/*   INDICES 1                    (secao opcional)                     */
+/*   INDICE idx_nome alunos nome                                       */
 /* ------------------------------------------------------------------ */
 
 static int catalogo_salvar(const Catalogo *cat, const char *caminho)
@@ -499,6 +662,11 @@ static int catalogo_salvar(const Catalogo *cat, const char *caminho)
         fprintf(f, "TABELA %s %d\n", t->nome, t->numero_colunas);
         for (int j = 0; j < t->numero_colunas; j++)
             fprintf(f, "COLUNA %s %s\n", t->colunas[j].nome, nome_token(t->colunas[j].tipo));
+    }
+    fprintf(f, "INDICES %d\n", cat->numero_indices);
+    for (int i = 0; i < cat->numero_indices; i++) {
+        const IndiceCat *x = &cat->indices[i];
+        fprintf(f, "INDICE %s %s %s\n", x->nome, x->tabela, x->coluna);
     }
 
     int falhou = ferror(f);
@@ -577,6 +745,27 @@ static int carregar_de_arquivo(Catalogo *cat, FILE *f)
         if (!catalogo_adicionar_tabela(cat, nome, colunas, n))
             return 0;   /* a mensagem ja foi gravada */
     }
+
+    /* Secao de indices: opcional, para continuar lendo catalogos antigos.
+     * Aqui so os metadados sao recarregados; a arvore B+ ja esta no disco. */
+    if (ler_palavra(f, palavra, sizeof palavra)) {
+        if (strcmp(palavra, "INDICES") != 0 || !ler_inteiro(f, &total) ||
+            total < 0 || total > MAX_INDICES)
+            return erro_cat(cat, "numero de indices invalido");
+
+        for (int i = 0; i < total; i++) {
+            char indice[MAX_LEXEMA], tabela[MAX_LEXEMA], coluna[MAX_LEXEMA];
+
+            if (!ler_palavra(f, palavra, sizeof palavra) || strcmp(palavra, "INDICE") != 0 ||
+                !ler_palavra(f, indice, sizeof indice) ||
+                !ler_palavra(f, tabela, sizeof tabela) ||
+                !ler_palavra(f, coluna, sizeof coluna))
+                return erro_cat(cat, "entrada INDICE %d invalida", i + 1);
+
+            if (!catalogo_registrar_indice(cat, tabela, indice, coluna))
+                return 0;
+        }
+    }
     return 1;
 }
 
@@ -598,6 +787,7 @@ static int catalogo_carregar(Catalogo *cat, const char *caminho)
 
     if (!ok) {
         cat->numero_tabelas = 0;    /* nao deixa um catalogo pela metade */
+        cat->numero_indices = 0;
         return -1;
     }
     return 1;
