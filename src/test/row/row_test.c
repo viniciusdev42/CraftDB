@@ -1,4 +1,3 @@
-#define ROW_MAIN
 #include "../../modules/executor/row/row.c"
 
 #include <assert.h>

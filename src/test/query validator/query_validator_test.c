@@ -1,4 +1,3 @@
-#define  VALIDATOR_MAIN
 #include "../../modules/executor/validator/query_validator.c"
 
 #include <stdio.h>
