@@ -5,6 +5,8 @@
  * "static" (consumir_token, sincronizar, falha, e_operador, ...).
  * O parser.c, por sua vez, inclui o tokenizer.c.
  *
+ * Cobre CREATE TABLE, CREATE INDEX, INSERT e SELECT.
+ *
  * Compilar e executar:
  *   cc -std=c99 -Wall -Wextra -o parser_test parser_test.c   (POSIX.1-2008)
  *   ./parser_test
@@ -750,8 +752,8 @@ static void teste_create_nome_no_limite_do_lexema(void)
 
 static void teste_create_erros_de_sintaxe(void)
 {
-    ESPERAR_ERRO("CREATE",                      "fim inesperado do texto (esperado: TABLE)");
-    ESPERAR_ERRO("CREATE t (a INT);",           "encontrado 't' (esperado: TABLE)");
+    ESPERAR_ERRO("CREATE",                      "fim inesperado do texto (esperado: TABLE ou INDEX)");
+    ESPERAR_ERRO("CREATE t (a INT);",           "encontrado 't' (esperado: TABLE ou INDEX)");
     ESPERAR_ERRO("CREATE TABLE (a INT);",       "encontrado '(' (esperado: nome da tabela)");
     ESPERAR_ERRO("CREATE TABLE 123 (a INT);",   "encontrado '123' (esperado: nome da tabela)");
     ESPERAR_ERRO("CREATE TABLE select (a INT);","encontrado 'select' (esperado: nome da tabela)");
@@ -774,6 +776,258 @@ static void teste_create_tokens_invalidos_e_nao_suportados(void)
     ESPERAR_ERRO("CREATE TABLE 1abc (a INT);",    "token invalido '1abc'");
     ESPERAR_ERRO("CREATE TABLE JOIN (a INT);",    "construcao nao suportada 'JOIN'");
     ESPERAR_ERRO("CREATE TABLE t (count INT);",   "construcao nao suportada 'count'");
+}
+
+/* ================================================================== */
+/* 6b. CREATE INDEX                                                    */
+/* ================================================================== */
+
+static void teste_create_index_basico(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE INDEX idx_id ON alunos (id);")) return;
+
+    VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+    VERIFICAR_STR("idx_id", c.indice);
+    VERIFICAR_STR("alunos", c.tabela);
+    VERIFICAR_STR("id", c.coluna_indice);
+    VERIFICAR_INT(0, c.numero_colunas);
+    VERIFICAR_INT(0, c.numero_valores);
+    VERIFICAR_INT(0, c.numero_condicoes);
+    VERIFICAR_TOKEN(TOKEN_FIM, p.atual.tipo);
+    VERIFICAR_STR("", p.mensagem);
+}
+
+static void teste_create_index_nao_e_create_table(void)
+{
+    Parser p; Comando c;
+
+    VERIFICAR(CMD_CREATE != CMD_CREATE_INDEX);
+
+    if (ESPERAR_OK("CREATE TABLE t (a INT);")) {
+        VERIFICAR_INT(CMD_CREATE, c.tipo);
+        VERIFICAR_STR("", c.indice);              /* campos de indice vazios */
+        VERIFICAR_STR("", c.coluna_indice);
+    }
+    if (ESPERAR_OK("CREATE INDEX i ON t (a);")) {
+        VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+        VERIFICAR_INT(0, c.numero_colunas);       /* nao usa a lista de colunas */
+    }
+}
+
+static void teste_create_index_palavras_reservadas_sem_diferenciar_caixa(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("create index Idx on Tab (Col);")) return;
+
+    VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+    VERIFICAR_STR("Idx", c.indice);              /* caixa dos nomes e preservada */
+    VERIFICAR_STR("Tab", c.tabela);
+    VERIFICAR_STR("Col", c.coluna_indice);
+
+    if (!ESPERAR_OK("CrEaTe InDeX i On t (a);")) return;
+    VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+}
+
+static void teste_create_index_sem_espacos_ao_redor_de_simbolos(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE INDEX i ON t(a);")) return;
+    VERIFICAR_STR("t", c.tabela);
+    VERIFICAR_STR("a", c.coluna_indice);
+
+    if (!ESPERAR_OK("CREATE INDEX i ON t( a );")) return;
+    VERIFICAR_STR("a", c.coluna_indice);
+
+    if (!ESPERAR_OK("CREATE INDEX i ON t (a) ;")) return;
+    VERIFICAR_TOKEN(TOKEN_FIM, p.atual.tipo);
+}
+
+static void teste_create_index_com_quebras_de_linha_e_tabs(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE\n  INDEX\ti\n  ON\tt\n(\n  a\n)\n;")) return;
+    VERIFICAR_STR("i", c.indice);
+    VERIFICAR_STR("t", c.tabela);
+    VERIFICAR_STR("a", c.coluna_indice);
+}
+
+static void teste_create_index_nomes_com_underscore_e_digitos(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE INDEX _idx_1 ON _tab_2 (col_3);")) return;
+    VERIFICAR_STR("_idx_1", c.indice);
+    VERIFICAR_STR("_tab_2", c.tabela);
+    VERIFICAR_STR("col_3", c.coluna_indice);
+}
+
+static void teste_create_index_nomes_iguais_sao_permitidos(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE INDEX t ON t (t);")) return;
+    VERIFICAR_STR("t", c.indice);
+    VERIFICAR_STR("t", c.tabela);
+    VERIFICAR_STR("t", c.coluna_indice);
+}
+
+static void teste_create_index_nome_no_limite_do_lexema(void)
+{
+    Parser p; Comando c;
+    char nome63[MAX_LEXEMA], nome64[MAX_LEXEMA + 1], buf[512];
+
+    memset(nome63, 'a', MAX_LEXEMA - 1);
+    nome63[MAX_LEXEMA - 1] = '\0';                           /* 63 caracteres */
+    memset(nome64, 'a', MAX_LEXEMA);
+    nome64[MAX_LEXEMA] = '\0';                               /* 64 caracteres */
+
+    snprintf(buf, sizeof buf, "CREATE INDEX %s ON %s (%s);", nome63, nome63, nome63);
+    if (ESPERAR_OK(buf)) {
+        VERIFICAR_STR(nome63, c.indice);
+        VERIFICAR_STR(nome63, c.tabela);
+        VERIFICAR_STR(nome63, c.coluna_indice);
+    }
+
+    snprintf(buf, sizeof buf, "CREATE INDEX %s ON t (a);", nome64);
+    VERIFICAR_INT(0, analisar(&p, &c, buf));
+    VERIFICAR_CONTEM(p.mensagem, "token invalido");
+
+    snprintf(buf, sizeof buf, "CREATE INDEX i ON %s (a);", nome64);
+    VERIFICAR_INT(0, analisar(&p, &c, buf));
+    VERIFICAR_CONTEM(p.mensagem, "token invalido");
+
+    snprintf(buf, sizeof buf, "CREATE INDEX i ON t (%s);", nome64);
+    VERIFICAR_INT(0, analisar(&p, &c, buf));
+    VERIFICAR_CONTEM(p.mensagem, "token invalido");
+}
+
+static void teste_parse_create_index_direto(void)
+{
+    /* parse_create_index espera atual == INDEX (CREATE ja consumido) */
+    Parser p; Comando c;
+    memset(&c, 0, sizeof c);
+    iniciar_parser(&p, "INDEX i ON t (a); SELECT");
+
+    VERIFICAR_INT(1, parse_create_index(&p, &c));
+    VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+    VERIFICAR_STR("i", c.indice);
+    VERIFICAR_STR("t", c.tabela);
+    VERIFICAR_STR("a", c.coluna_indice);
+    VERIFICAR_TOKEN(TOKEN_SELECT, p.atual.tipo);         /* parou depois do ';' */
+}
+
+static void teste_create_index_erros_de_sintaxe(void)
+{
+    ESPERAR_ERRO("CREATE INDEX",                     "fim inesperado do texto (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX;",                    "encontrado ';' (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX ON t (a);",           "encontrado 'ON' (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX 123 ON t (a);",       "encontrado '123' (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX 'x' ON t (a);",       "encontrado 'x' (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX select ON t (a);",    "encontrado 'select' (esperado: nome do indice)");
+    ESPERAR_ERRO("CREATE INDEX int ON t (a);",       "encontrado 'int' (esperado: nome do indice)");
+
+    ESPERAR_ERRO("CREATE INDEX i",                   "fim inesperado do texto (esperado: ON)");
+    ESPERAR_ERRO("CREATE INDEX i t (a);",            "encontrado 't' (esperado: ON)");
+    ESPERAR_ERRO("CREATE INDEX i FROM t (a);",       "encontrado 'FROM' (esperado: ON)");
+
+    ESPERAR_ERRO("CREATE INDEX i ON",                "fim inesperado do texto (esperado: nome da tabela)");
+    ESPERAR_ERRO("CREATE INDEX i ON (a);",           "encontrado '(' (esperado: nome da tabela)");
+    ESPERAR_ERRO("CREATE INDEX i ON 5 (a);",         "encontrado '5' (esperado: nome da tabela)");
+    ESPERAR_ERRO("CREATE INDEX i ON TABLE (a);",     "encontrado 'TABLE' (esperado: nome da tabela)");
+
+    ESPERAR_ERRO("CREATE INDEX i ON t",              "fim inesperado do texto (esperado: '(')");
+    ESPERAR_ERRO("CREATE INDEX i ON t a);",          "encontrado 'a' (esperado: '(')");
+    ESPERAR_ERRO("CREATE INDEX i ON t;",             "encontrado ';' (esperado: '(')");
+
+    ESPERAR_ERRO("CREATE INDEX i ON t (",            "fim inesperado do texto (esperado: nome da coluna)");
+    ESPERAR_ERRO("CREATE INDEX i ON t ();",          "encontrado ')' (esperado: nome da coluna)");
+    ESPERAR_ERRO("CREATE INDEX i ON t (5);",         "encontrado '5' (esperado: nome da coluna)");
+    ESPERAR_ERRO("CREATE INDEX i ON t (INT);",       "encontrado 'INT' (esperado: nome da coluna)");
+
+    ESPERAR_ERRO("CREATE INDEX i ON t (a",           "fim inesperado do texto (esperado: ')')");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a;",          "encontrado ';' (esperado: ')')");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a b);",       "encontrado 'b' (esperado: ')')");
+
+    ESPERAR_ERRO("CREATE INDEX i ON t (a)",          "fim inesperado do texto (esperado: ';')");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a) x;",       "encontrado 'x' (esperado: ';')");
+}
+
+static void teste_create_index_uma_unica_coluna(void)
+{
+    /* a gramatica aceita exatamente uma coluna por indice */
+    ESPERAR_ERRO("CREATE INDEX i ON t (a, b);", "encontrado ',' (esperado: ')')");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a,);",   "encontrado ',' (esperado: ')')");
+}
+
+static void teste_create_index_nao_aceita_declaracao_de_tipo(void)
+{
+    /* diferente de CREATE TABLE: nao ha tipo apos o nome da coluna */
+    ESPERAR_ERRO("CREATE INDEX i ON t (a INT);", "encontrado 'INT' (esperado: ')')");
+}
+
+static void teste_create_index_variantes_nao_suportadas(void)
+{
+    ESPERAR_ERRO("CREATE UNIQUE INDEX i ON t (a);", "encontrado 'UNIQUE' (esperado: TABLE ou INDEX)");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a) WHERE a = 1;", "encontrado 'WHERE' (esperado: ';')");
+    ESPERAR_ERRO("CREATE INDEX i ON t (t.a);",      "token invalido '.'");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a ASC);",    "encontrado 'ASC' (esperado: ')')");
+}
+
+static void teste_create_index_tokens_invalidos_e_nao_suportados(void)
+{
+    ESPERAR_ERRO("CREATE INDEX @ ON t (a);",       "token invalido '@'");
+    ESPERAR_ERRO("CREATE INDEX 1abc ON t (a);",    "token invalido '1abc'");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a) @;",     "token invalido '@'");
+    ESPERAR_ERRO("CREATE INDEX JOIN ON t (a);",    "construcao nao suportada 'JOIN'");
+    ESPERAR_ERRO("CREATE INDEX i ON ORDER (a);",   "construcao nao suportada 'ORDER'");
+    ESPERAR_ERRO("CREATE INDEX i ON t (count);",   "construcao nao suportada 'count'");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a OR b);",  "construcao nao suportada 'OR'");
+}
+
+static void teste_create_index_posicao_do_erro(void)
+{
+    ESPERAR_ERRO("CREATE INDEX i ON t (1);",          "Linha 1, coluna 22: encontrado '1'");
+    ESPERAR_ERRO("CREATE INDEX i ON t (a)",           "Linha 1, coluna 24: fim inesperado");
+    ESPERAR_ERRO("CREATE INDEX\n  i\n  ON\n  t\n  (1);",
+                 "Linha 5, coluna 4: encontrado '1' (esperado: nome da coluna)");
+}
+
+static void teste_create_index_zera_a_estrutura_e_nao_acumula(void)
+{
+    Parser p; Comando c;
+
+    memset(&c, 0xFF, sizeof c);                  /* lixo */
+    if (!ESPERAR_OK("CREATE INDEX i ON t (a);")) return;
+    VERIFICAR_INT(0, c.numero_colunas);
+    VERIFICAR_INT(0, c.numero_valores);
+    VERIFICAR_INT(0, c.numero_condicoes);
+
+    /* CREATE TABLE seguido de CREATE INDEX na mesma estrutura */
+    iniciar_parser(&p, "CREATE TABLE t (x INT, y CHAR); CREATE INDEX i ON t (x);");
+    VERIFICAR_INT(1, parse_comando(&p, &c));
+    VERIFICAR_INT(2, c.numero_colunas);
+    VERIFICAR_INT(1, parse_comando(&p, &c));
+    VERIFICAR_INT(CMD_CREATE_INDEX, c.tipo);
+    VERIFICAR_INT(0, c.numero_colunas);          /* nao herda as colunas */
+    VERIFICAR_STR("i", c.indice);
+    VERIFICAR_STR("x", c.coluna_indice);
+
+    /* CREATE INDEX seguido de CREATE TABLE: campos do indice sao limpos */
+    iniciar_parser(&p, "CREATE INDEX i ON t (x); CREATE TABLE u (z INT);");
+    VERIFICAR_INT(1, parse_comando(&p, &c));
+    VERIFICAR_INT(1, parse_comando(&p, &c));
+    VERIFICAR_INT(CMD_CREATE, c.tipo);
+    VERIFICAR_STR("u", c.tabela);
+    VERIFICAR_STR("", c.indice);
+    VERIFICAR_STR("", c.coluna_indice);
+    VERIFICAR_INT(1, c.numero_colunas);
+}
+
+static void teste_create_index_para_logo_apos_o_ponto_virgula(void)
+{
+    Parser p; Comando c;
+    if (!ESPERAR_OK("CREATE INDEX i ON t (a); lixo")) return;
+    VERIFICAR_TOKEN(TOKEN_IDENTACAO, p.atual.tipo);
+    VERIFICAR_STR("lixo", p.atual.lexema);
 }
 
 /* ================================================================== */
@@ -1245,6 +1499,58 @@ static void teste_programa_erros_lexicos_nao_travam(void)
     VERIFICAR_INT(2, erros);
 }
 
+static void teste_programa_com_create_index(void)
+{
+    int ok, erros;
+    executar_programa("CREATE TABLE t (a INT, b CHAR);\n"
+                      "CREATE INDEX idx_a ON t (a);\n"
+                      "INSERT INTO t VALUES (1, 'x');\n"
+                      "SELECT * FROM t WHERE a = 1;\n",
+                      &ok, &erros, NULL, 0);
+    VERIFICAR_INT(4, ok);
+    VERIFICAR_INT(0, erros);
+}
+
+static void teste_programa_recupera_apos_erro_em_create_index(void)
+{
+    int ok, erros;
+    char msg[MAX_MESSAGEM];
+
+    /* erro no meio do CREATE INDEX: descarta ate o ';' e segue */
+    executar_programa("CREATE TABLE t (a INT);\n"
+                      "CREATE INDEX i ON t (a b);\n"      /* erro */
+                      "CREATE INDEX j ON t (a);\n"
+                      "SELECT * FROM t;\n",
+                      &ok, &erros, msg, sizeof msg);
+    VERIFICAR_INT(3, ok);
+    VERIFICAR_INT(1, erros);
+    VERIFICAR_CONTEM(msg, "Linha 2,");
+    VERIFICAR_CONTEM(msg, "esperado: ')'");
+
+    /* erro logo apos o '(' : o ';' do erro e consumido pela sincronizacao */
+    executar_programa("CREATE INDEX i ON t (; SELECT * FROM t;",
+                      &ok, &erros, NULL, 0);
+    VERIFICAR_INT(1, ok);
+    VERIFICAR_INT(1, erros);
+
+    /* falta ';' no CREATE INDEX: o proximo comando e engolido ate o ';' */
+    executar_programa("CREATE INDEX i ON t (a) SELECT * FROM t; SELECT * FROM t;",
+                      &ok, &erros, NULL, 0);
+    VERIFICAR_INT(1, ok);
+    VERIFICAR_INT(1, erros);
+}
+
+static void teste_programa_varios_create_index(void)
+{
+    int ok, erros;
+    executar_programa("CREATE INDEX i1 ON t (a);"
+                      "CREATE INDEX i2 ON t (b);"
+                      "CREATE INDEX i3 ON u (c);",
+                      &ok, &erros, NULL, 0);
+    VERIFICAR_INT(3, ok);
+    VERIFICAR_INT(0, erros);
+}
+
 /* ================================================================== */
 /* 11. Impressao da AST (captura de stdout)                            */
 /* ================================================================== */
@@ -1284,6 +1590,21 @@ static void teste_imprimir_create(void)
                   "  colunas:\n"
                   "    - id : INT\n"
                   "    - nome : CHAR\n", saida);
+}
+
+static void teste_imprimir_create_index(void)
+{
+    Parser p; Comando c;
+    char saida[512];
+    if (!ESPERAR_OK("CREATE INDEX idx_nome ON alunos (nome);")) return;
+
+    captura_iniciar();
+    imprimir_comando(&c);
+    captura_finalizar(saida, sizeof saida);
+    VERIFICAR_STR("CREATE INDEX\n"
+                  "  indice : idx_nome\n"
+                  "  tabela : alunos\n"
+                  "  coluna : nome\n", saida);
 }
 
 static void teste_imprimir_insert(void)
@@ -1394,6 +1715,25 @@ int main(void)
     EXECUTAR(teste_create_erros_de_sintaxe);
     EXECUTAR(teste_create_tokens_invalidos_e_nao_suportados);
 
+    /* 6b. CREATE INDEX */
+    EXECUTAR(teste_create_index_basico);
+    EXECUTAR(teste_create_index_nao_e_create_table);
+    EXECUTAR(teste_create_index_palavras_reservadas_sem_diferenciar_caixa);
+    EXECUTAR(teste_create_index_sem_espacos_ao_redor_de_simbolos);
+    EXECUTAR(teste_create_index_com_quebras_de_linha_e_tabs);
+    EXECUTAR(teste_create_index_nomes_com_underscore_e_digitos);
+    EXECUTAR(teste_create_index_nomes_iguais_sao_permitidos);
+    EXECUTAR(teste_create_index_nome_no_limite_do_lexema);
+    EXECUTAR(teste_parse_create_index_direto);
+    EXECUTAR(teste_create_index_erros_de_sintaxe);
+    EXECUTAR(teste_create_index_uma_unica_coluna);
+    EXECUTAR(teste_create_index_nao_aceita_declaracao_de_tipo);
+    EXECUTAR(teste_create_index_variantes_nao_suportadas);
+    EXECUTAR(teste_create_index_tokens_invalidos_e_nao_suportados);
+    EXECUTAR(teste_create_index_posicao_do_erro);
+    EXECUTAR(teste_create_index_zera_a_estrutura_e_nao_acumula);
+    EXECUTAR(teste_create_index_para_logo_apos_o_ponto_virgula);
+
     /* 7. INSERT */
     EXECUTAR(teste_insert_numeros);
     EXECUTAR(teste_insert_strings);
@@ -1440,10 +1780,14 @@ int main(void)
     EXECUTAR(teste_programa_ponto_virgula_solto_conta_como_erro);
     EXECUTAR(teste_programa_erro_em_segunda_linha_reporta_linha_correta);
     EXECUTAR(teste_programa_erros_lexicos_nao_travam);
+    EXECUTAR(teste_programa_com_create_index);
+    EXECUTAR(teste_programa_recupera_apos_erro_em_create_index);
+    EXECUTAR(teste_programa_varios_create_index);
 
     /* 11. Impressao */
     EXECUTAR(teste_imprimir_valor);
     EXECUTAR(teste_imprimir_create);
+    EXECUTAR(teste_imprimir_create_index);
     EXECUTAR(teste_imprimir_insert);
     EXECUTAR(teste_imprimir_select_sem_where);
     EXECUTAR(teste_imprimir_select_com_where);

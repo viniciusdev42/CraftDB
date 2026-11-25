@@ -8,6 +8,9 @@
  *   consulta ........... catalogo_iniciar, catalogo_buscar_tabela,
  *                        tabela_buscar_coluna
  *   CREATE TABLE ....... catalogo_adicionar_tabela
+ *   CREATE INDEX ....... montar_nome_arquivo_indice, catalogo_buscar_indice,
+ *                        catalogo_registrar_indice, preparar_arvore_indice,
+ *                        desfazer_ultimo_indice, catalogo_criar_indice
  *   semantica .......... valor_compativel, catalogo_validar_insert,
  *                        catalogo_validar_select
  *   armazenamento ...... selecionar_arquivo_tabela, empacotar_char,
@@ -178,6 +181,13 @@ static void cmd_condicao(const char *col, TipoToken op, Valor v)
     c->valor    = v;
 }
 
+/* Completa um comando CMD_CREATE_INDEX: CREATE INDEX indice ON tabela (coluna) */
+static void cmd_indice(const char *indice, const char *coluna)
+{
+    snprintf(g_cmd.indice, sizeof g_cmd.indice, "%s", indice);
+    snprintf(g_cmd.coluna_indice, sizeof g_cmd.coluna_indice, "%s", coluna);
+}
+
 static Registro registro(int id, int valor)
 {
     Registro r;
@@ -257,6 +267,17 @@ static FILE *abrir_texto(const char *conteudo)
 static int existe_arquivo(const char *caminho)
 {
     return access(caminho, F_OK) == 0;
+}
+
+/* Arquivos .idx que os testes de CREATE INDEX podem deixar para tras */
+static void remover_arquivos_de_indices(void)
+{
+    static const char *const nomes[] = {
+        "idx_nome.idx", "idx_id.idx", "idx_valor.idx", "idx_lixo.idx",
+        "idx_falha.idx", "idx_dir.idx", "outro.idx", "ix.idx", "1x.idx"
+    };
+    for (size_t i = 0; i < sizeof nomes / sizeof nomes[0]; i++)
+        remove(nomes[i]);
 }
 
 static int g_stdout_original = -1;
@@ -381,6 +402,9 @@ static void test_catalogo_iniciar(void)
     CHECK_STR(g_cat.tabelas[0].nome, "");
     CHECK_INT(g_cat.tabelas[0].numero_colunas, 0);
     CHECK_INT(g_cat.tabelas[MAX_TABELAS - 1].numero_colunas, 0);
+    CHECK_INT(g_cat.numero_indices, 0);
+    CHECK_STR(g_cat.indices[0].nome, "");
+    CHECK_STR(g_cat.indices[MAX_INDICES - 1].arquivo, "");
 }
 
 static void test_catalogo_buscar_tabela(void)
@@ -617,6 +641,223 @@ static void test_adicionar_tabela_restricoes_fisicas(void)
     /* nenhuma das tentativas acima deixou rastro no catalogo */
     CHECK_INT(g_cat.numero_tabelas, 0);
     CHECK(catalogo_buscar_tabela(&g_cat, "t1") == NULL);
+}
+
+/* ================================================================== */
+/* CREATE INDEX: nomes, busca e registro dos metadados                 */
+/* ================================================================== */
+
+static void test_montar_nome_arquivo_indice(void)
+{
+    char saida[TAM_ARQUIVO];
+    char dat[TAM_ARQUIVO];
+    char longo[MAX_LEXEMA * 3];
+    size_t n;
+
+    montar_nome_arquivo_indice(saida, "idx_nome");
+    CHECK_STR(saida, "idx_nome.idx");
+
+    montar_nome_arquivo_indice(saida, "Idx_Nome");      /* vai para minusculas */
+    CHECK_STR(saida, "idx_nome.idx");
+
+    montar_nome_arquivo_indice(saida, "IDX_2");
+    CHECK_STR(saida, "idx_2.idx");
+
+    montar_nome_arquivo_indice(saida, "i");
+    CHECK_STR(saida, "i.idx");
+
+    /* indice e tabela com o mesmo nome nao disputam o mesmo arquivo */
+    montar_nome_arquivo(dat, "alunos");
+    montar_nome_arquivo_indice(saida, "alunos");
+    CHECK_STR(dat, "alunos.dat");
+    CHECK_STR(saida, "alunos.idx");
+
+    /* nome gigante e cortado em MAX_LEXEMA-1 caracteres + ".idx" */
+    repetir(longo, 'X', MAX_LEXEMA * 3 - 1);
+    montar_nome_arquivo_indice(saida, longo);
+    n = strlen(saida);
+    CHECK_INT(n, (MAX_LEXEMA - 1) + 4);
+    CHECK(n < TAM_ARQUIVO);
+    CHECK_STR(saida + n - 4, ".idx");
+    CHECK(saida[0] == 'x' && saida[MAX_LEXEMA - 2] == 'x');
+}
+
+static void test_catalogo_buscar_indice(void)
+{
+    catalogo_padrao();
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_nome") == NULL);      /* sem indices */
+
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos",  "idx_nome",  "nome"),  1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_nome")  == &g_cat.indices[0]);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_valor") == &g_cat.indices[1]);
+
+    /* nomes de indice nao diferenciam maiusculas de minusculas */
+    CHECK(catalogo_buscar_indice(&g_cat, "IDX_NOME")  == &g_cat.indices[0]);
+    CHECK(catalogo_buscar_indice(&g_cat, "Idx_Valor") == &g_cat.indices[1]);
+
+    CHECK(catalogo_buscar_indice(&g_cat, "inexistente") == NULL);
+    CHECK(catalogo_buscar_indice(&g_cat, "") == NULL);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx") == NULL);           /* prefixo */
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_nome2") == NULL);
+    CHECK(catalogo_buscar_indice(&g_cat, "alunos") == NULL);        /* nome de tabela */
+
+    /* so olha os indices registrados (numero_indices) */
+    g_cat.numero_indices = 1;
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_valor") == NULL);
+}
+
+static void test_registrar_indice_sucesso(void)
+{
+    Coluna maiusculas[] = { coluna("Id", TOKEN_INT), coluna("Nome", TOKEN_CHAR) };
+    char longo[MAX_LEXEMA];
+    const IndiceCat *x;
+
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    /* coluna CHAR: guarda posicao, tipo e a grafia original do indice */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "Idx_Nome", "nome"), 1);
+    CHECK_INT(g_cat.numero_indices, 1);
+    x = &g_cat.indices[0];
+    CHECK_STR(x->nome, "Idx_Nome");
+    CHECK_STR(x->tabela, "alunos");
+    CHECK_STR(x->coluna, "nome");
+    CHECK_INT(x->indice_coluna, 1);
+    CHECK(x->tipo_chave == TOKEN_CHAR);
+    CHECK_STR(x->arquivo, "idx_nome.idx");              /* arquivo em minusculas */
+
+    /* coluna INT (a primeira da tabela) */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_id", "id"), 1);
+    CHECK_INT(g_cat.numero_indices, 2);
+    x = &g_cat.indices[1];
+    CHECK_STR(x->nome, "idx_id");
+    CHECK_STR(x->tabela, "numeros");
+    CHECK_STR(x->coluna, "id");
+    CHECK_INT(x->indice_coluna, 0);
+    CHECK(x->tipo_chave == TOKEN_INT);
+    CHECK_STR(x->arquivo, "idx_id.idx");
+
+    /* outra coluna da mesma tabela e a mesma coluna de outra tabela sao livres */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "idx_aid", "id"), 1);
+    CHECK_INT(g_cat.numero_indices, 4);
+    CHECK_INT(g_cat.indices[2].indice_coluna, 1);
+    CHECK(g_cat.indices[2].tipo_chave == TOKEN_INT);
+
+    /* so metadados: nenhum arquivo foi criado */
+    CHECK(!existe_arquivo("idx_nome.idx"));
+    CHECK(!existe_arquivo("idx_id.idx"));
+
+    /* tabela e coluna sem diferenciar maiusculas: vale a grafia do catalogo */
+    catalogo_iniciar(&g_cat);
+    CHECK_INT(catalogo_adicionar_tabela(&g_cat, "Alunos", maiusculas, 2), 1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "ALUNOS", "ix", "NOME"), 1);
+    x = &g_cat.indices[0];
+    CHECK_STR(x->tabela, "Alunos");
+    CHECK_STR(x->coluna, "Nome");
+    CHECK_INT(x->indice_coluna, 1);
+
+    /* nome de indice com o maior tamanho possivel (MAX_LEXEMA-1) */
+    catalogo_padrao();
+    repetir(longo, 'a', MAX_LEXEMA - 1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "solo", longo, "id"), 1);
+    CHECK_INT(strlen(g_cat.indices[0].nome), MAX_LEXEMA - 1);
+    CHECK_INT(strlen(g_cat.indices[0].arquivo), (MAX_LEXEMA - 1) + 4);
+}
+
+static void esperar_erro_registrar(int linha, const char *tabela, const char *indice,
+                                   const char *coluna, const char *trecho)
+{
+    int falhas_antes = g_falhas;
+    int indices_antes = g_cat.numero_indices;
+    int r = catalogo_registrar_indice(&g_cat, tabela, indice, coluna);
+
+    CHECK_INT(r, 0);
+    CHECK_INT(g_cat.numero_indices, indices_antes);     /* nada foi registrado */
+    CHECK_CONTEM(g_cat.mensagem, trecho);
+    if (g_falhas != falhas_antes)
+        printf("      (chamada em test_catalog.c:%d, indice '%s')\n", linha, indice);
+}
+
+#define ESPERAR_ERRO_INDICE(tabela, indice, coluna, trecho) \
+    esperar_erro_registrar(__LINE__, tabela, indice, coluna, trecho)
+
+static void test_registrar_indice_erros(void)
+{
+    char longo[MAX_LEXEMA + 1];
+
+    catalogo_padrao();
+
+    /* nome de indice invalido */
+    ESPERAR_ERRO_INDICE("alunos", "",     "nome", "nome de indice invalido");
+    ESPERAR_ERRO_INDICE("alunos", "1idx", "nome", "nome de indice invalido");
+    ESPERAR_ERRO_INDICE("alunos", "a-b",  "nome", "nome de indice invalido");
+    ESPERAR_ERRO_INDICE("alunos", "a b",  "nome", "nome de indice invalido");
+    CHECK_CONTEM(g_cat.mensagem, "a b");                /* a mensagem cita o nome */
+
+    /* nome que nao cabe em MAX_LEXEMA bytes (com o '\0') */
+    repetir(longo, 'a', MAX_LEXEMA);
+    ESPERAR_ERRO_INDICE("alunos", longo, "nome", "nome de indice invalido");
+
+    /* tabela e coluna inexistentes */
+    ESPERAR_ERRO_INDICE("fantasma", "idx_f", "id", "tabela 'fantasma' nao existe");
+    ESPERAR_ERRO_INDICE("alunos", "idx_f", "idade",
+                        "coluna 'idade' nao existe na tabela 'alunos'");
+    ESPERAR_ERRO_INDICE("ALUNOS", "idx_f", "idade", "na tabela 'alunos'");  /* grafia do catalogo */
+    ESPERAR_ERRO_INDICE("solo", "idx_f", "nome", "nao existe na tabela 'solo'");
+
+    /* nome de indice repetido (sem diferenciar maiusculas) */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    ESPERAR_ERRO_INDICE("numeros", "idx_nome", "valor", "ja existe");
+    ESPERAR_ERRO_INDICE("numeros", "IDX_NOME", "valor", "ja existe");
+    CHECK_CONTEM(g_cat.mensagem, "IDX_NOME");
+
+    /* a mesma coluna nao pode ter dois indices (nem com outra grafia) */
+    ESPERAR_ERRO_INDICE("alunos", "outro", "nome", "ja possui o indice 'idx_nome'");
+    CHECK_CONTEM(g_cat.mensagem, "'nome'");
+    CHECK_CONTEM(g_cat.mensagem, "'alunos'");
+    ESPERAR_ERRO_INDICE("ALUNOS", "outro", "NOME", "ja possui o indice 'idx_nome'");
+
+    /* ordem das validacoes: nome invalido e nome repetido vem antes da tabela */
+    ESPERAR_ERRO_INDICE("fantasma", "1x", "id", "nome de indice invalido");
+    ESPERAR_ERRO_INDICE("fantasma", "idx_nome", "id", "ja existe");
+
+    /* nenhuma tentativa falha deixou rastro */
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK(catalogo_buscar_indice(&g_cat, "outro") == NULL);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_f") == NULL);
+}
+
+static void test_registrar_indice_limite(void)
+{
+    Coluna cols[] = { coluna("id", TOKEN_INT), coluna("valor", TOKEN_INT) };
+    char tabela[16], indice[16];
+    int tabelas = (MAX_INDICES + 1) / 2;       /* 2 colunas indexaveis por tabela */
+
+    if (tabelas > MAX_TABELAS || MAX_COLUNAS < 2) {
+        printf("    (aviso: MAX_INDICES=%d nao cabe nas tabelas possiveis; limite nao testado)\n",
+               MAX_INDICES);
+        return;
+    }
+
+    catalogo_iniciar(&g_cat);
+    for (int i = 0; i < tabelas; i++) {
+        snprintf(tabela, sizeof tabela, "t%d", i);
+        CHECK_INT(catalogo_adicionar_tabela(&g_cat, tabela, cols, 2), 1);
+    }
+    for (int i = 0; i < MAX_INDICES; i++) {
+        snprintf(tabela, sizeof tabela, "t%d", i / 2);
+        snprintf(indice, sizeof indice, "ix%d", i);
+        CHECK_INT(catalogo_registrar_indice(&g_cat, tabela, indice,
+                                            (i % 2) ? "valor" : "id"), 1);
+    }
+    CHECK_INT(g_cat.numero_indices, MAX_INDICES);
+
+    ESPERAR_ERRO_INDICE("t0", "extra", "id", "numero maximo de indices");
+    /* com o catalogo cheio, repetir um nome continua sendo erro de duplicata */
+    ESPERAR_ERRO_INDICE("t0", "ix0", "id", "ja existe");
 }
 
 /* ================================================================== */
@@ -1222,6 +1463,39 @@ static void test_catalogo_imprimir(void)
     CHECK(strstr(saida, "Tabela numeros") < strstr(saida, "Tabela solo"));
 }
 
+static void test_catalogo_imprimir_indices(void)
+{
+    const char *saida;
+
+    /* sem indices a secao nem aparece */
+    catalogo_padrao();
+    captura_iniciar();
+    catalogo_imprimir(&g_cat);
+    saida = captura_finalizar();
+    CHECK_NAO_CONTEM(saida, "INDICES");
+
+    /* com indices: secao propria depois das tabelas, na ordem de criacao */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos",  "idx_nome",  "nome"),  1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    captura_iniciar();
+    catalogo_imprimir(&g_cat);
+    saida = captura_finalizar();
+
+    CHECK_CONTEM(saida, "=== CATALOGO (3 tabela(s)) ===");
+    CHECK_CONTEM(saida, "\n\n=== INDICES (2) ===\n");      /* linha em branco antes */
+    CHECK_CONTEM(saida, "  idx_nome: alunos(nome)  (arquivo: idx_nome.idx)\n");
+    CHECK_CONTEM(saida, "  idx_valor: numeros(valor)  (arquivo: idx_valor.idx)\n");
+    CHECK(strstr(saida, "Tabela solo") < strstr(saida, "=== INDICES"));
+    CHECK(strstr(saida, "idx_nome:") < strstr(saida, "idx_valor:"));
+
+    /* catalogo sem tabelas nao tem indices para mostrar */
+    catalogo_iniciar(&g_cat);
+    captura_iniciar();
+    catalogo_imprimir(&g_cat);
+    saida = captura_finalizar();
+    CHECK_NAO_CONTEM(saida, "INDICES");
+}
+
 /* ================================================================== */
 /* Persistencia                                                        */
 /* ================================================================== */
@@ -1241,7 +1515,8 @@ static void test_catalogo_salvar(void)
              "TABELAS 3\n"
              "TABELA alunos 2\nCOLUNA id INT\nCOLUNA nome CHAR\n"
              "TABELA numeros 2\nCOLUNA id INT\nCOLUNA valor INT\n"
-             "TABELA solo 1\nCOLUNA id INT\n",
+             "TABELA solo 1\nCOLUNA id INT\n"
+             "INDICES 0\n",
              CAT_MAGICA, CAT_VERSAO);
     CHECK(ler_arquivo("cat_salvar.cat", lido, sizeof lido) >= 0);
     CHECK_STR(lido, esperado);
@@ -1252,7 +1527,7 @@ static void test_catalogo_salvar(void)
     /* salvar de novo substitui o conteudo anterior */
     catalogo_iniciar(&g_cat);
     CHECK_INT(catalogo_salvar(&g_cat, "cat_salvar.cat"), 1);
-    snprintf(esperado, sizeof esperado, "%s %d\nTABELAS 0\n", CAT_MAGICA, CAT_VERSAO);
+    snprintf(esperado, sizeof esperado, "%s %d\nTABELAS 0\nINDICES 0\n", CAT_MAGICA, CAT_VERSAO);
     ler_arquivo("cat_salvar.cat", lido, sizeof lido);
     CHECK_STR(lido, esperado);
     CHECK(!existe_arquivo("cat_salvar.cat.tmp"));
@@ -1366,6 +1641,7 @@ static void test_catalogo_carregar_ida_e_volta(void)
 
     CHECK_INT(catalogo_carregar(&g_cat2, "cat_volta.cat"), 1);
     CHECK_INT(g_cat2.numero_tabelas, g_cat.numero_tabelas);
+    CHECK_INT(g_cat2.numero_indices, 0);
 
     for (int i = 0; i < g_cat.numero_tabelas; i++) {
         const TabelaCat *a = &g_cat.tabelas[i], *b = &g_cat2.tabelas[i];
@@ -1527,6 +1803,191 @@ static void test_catalogo_carregar_invalido(void)
                      "TABELA b 1\nCOLUNA id FLOAT\n",
                      "tipo 'FLOAT' desconhecido");
     CHECK(catalogo_buscar_tabela(&g_cat, "a") == NULL);
+}
+
+static void test_catalogo_salvar_indices(void)
+{
+    char esperado[512], lido[1024];
+
+    catalogo_padrao();
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos",  "idx_nome",  "nome"),  1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    remove("cat_indices.cat");
+
+    CHECK_INT(catalogo_salvar(&g_cat, "cat_indices.cat"), 1);
+
+    snprintf(esperado, sizeof esperado,
+             "%s %d\n"
+             "TABELAS 3\n"
+             "TABELA alunos 2\nCOLUNA id INT\nCOLUNA nome CHAR\n"
+             "TABELA numeros 2\nCOLUNA id INT\nCOLUNA valor INT\n"
+             "TABELA solo 1\nCOLUNA id INT\n"
+             "INDICES 2\n"
+             "INDICE idx_nome alunos nome\n"
+             "INDICE idx_valor numeros valor\n",
+             CAT_MAGICA, CAT_VERSAO);
+    CHECK(ler_arquivo("cat_indices.cat", lido, sizeof lido) >= 0);
+    CHECK_STR(lido, esperado);
+    CHECK(!existe_arquivo("cat_indices.cat.tmp"));
+}
+
+static void test_catalogo_carregar_indices_ida_e_volta(void)
+{
+    catalogo_padrao();
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos",  "idx_nome",  "nome"),  1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "Idx_Id",    "id"),    1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    CHECK_INT(catalogo_salvar(&g_cat, "cat_volta_idx.cat"), 1);
+
+    CHECK_INT(catalogo_carregar(&g_cat2, "cat_volta_idx.cat"), 1);
+    CHECK_INT(g_cat2.numero_tabelas, g_cat.numero_tabelas);
+    CHECK_INT(g_cat2.numero_indices, g_cat.numero_indices);
+
+    for (int i = 0; i < g_cat.numero_indices; i++) {
+        const IndiceCat *a = &g_cat.indices[i], *b = &g_cat2.indices[i];
+        CHECK_STR(b->nome, a->nome);
+        CHECK_STR(b->tabela, a->tabela);
+        CHECK_STR(b->coluna, a->coluna);
+        CHECK_INT(b->indice_coluna, a->indice_coluna);
+        CHECK(b->tipo_chave == a->tipo_chave);
+        CHECK_STR(b->arquivo, a->arquivo);
+    }
+    CHECK(catalogo_buscar_indice(&g_cat2, "IDX_NOME") == &g_cat2.indices[0]);
+    CHECK_STR(g_cat2.indices[1].nome, "Idx_Id");           /* grafia preservada */
+
+    /* carregar so recarrega metadados: nao cria o arquivo do indice */
+    remover_arquivos_de_indices();
+    CHECK_INT(catalogo_carregar(&g_cat2, "cat_volta_idx.cat"), 1);
+    CHECK(!existe_arquivo("idx_nome.idx"));
+
+    /* catalogo sem indices tambem faz a viagem de ida e volta */
+    catalogo_padrao();
+    CHECK_INT(catalogo_salvar(&g_cat, "cat_volta_idx.cat"), 1);
+    CHECK_INT(catalogo_carregar(&g_cat2, "cat_volta_idx.cat"), 1);
+    CHECK_INT(g_cat2.numero_indices, 0);
+
+    /* carregar substitui os indices que ja estavam na memoria */
+    catalogo_padrao();
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    remove("nao_existe.cat");
+    CHECK_INT(catalogo_carregar(&g_cat, "nao_existe.cat"), 0);
+    CHECK_INT(g_cat.numero_indices, 0);
+}
+
+static void test_catalogo_carregar_indices_casos_especiais(void)
+{
+    /* catalogo antigo, sem a secao INDICES, continua valido */
+    escrever_arquivo("antigo.cat",
+                     "CATALOGO 1\nTABELAS 1\nTABELA t 2\nCOLUNA id INT\nCOLUNA nome CHAR\n");
+    CHECK_INT(catalogo_carregar(&g_cat, "antigo.cat"), 1);
+    CHECK_INT(g_cat.numero_tabelas, 1);
+    CHECK_INT(g_cat.numero_indices, 0);
+
+    /* secao INDICES vazia */
+    escrever_arquivo("sem_indices.cat",
+                     "CATALOGO 1\nTABELAS 1\nTABELA t 1\nCOLUNA id INT\nINDICES 0\n");
+    CHECK_INT(catalogo_carregar(&g_cat, "sem_indices.cat"), 1);
+    CHECK_INT(g_cat.numero_indices, 0);
+
+    /* qualquer espacamento entre as palavras; tabela e coluna com outra grafia */
+    escrever_arquivo("espacos_idx.cat",
+                     "CATALOGO 1 TABELAS 1 TABELA t 2 COLUNA id INT COLUNA nome CHAR\n"
+                     "  INDICES   1\n\n  INDICE  ix   T   NOME");
+    CHECK_INT(catalogo_carregar(&g_cat, "espacos_idx.cat"), 1);
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK_STR(g_cat.indices[0].nome, "ix");
+    CHECK_STR(g_cat.indices[0].tabela, "t");               /* grafia do catalogo */
+    CHECK_STR(g_cat.indices[0].coluna, "nome");
+    CHECK_INT(g_cat.indices[0].indice_coluna, 1);
+    CHECK(g_cat.indices[0].tipo_chave == TOKEN_CHAR);
+    CHECK_STR(g_cat.indices[0].arquivo, "ix.idx");
+
+    /* exatamente MAX_INDICES indices e aceito */
+    {
+        int tabelas = (MAX_INDICES + 1) / 2;
+
+        if (tabelas <= MAX_TABELAS && MAX_COLUNAS >= 2) {
+            char *conteudo = malloc((size_t)(MAX_TABELAS + MAX_INDICES) * 80 + 128);
+            size_t pos = 0;
+
+            pos += (size_t)sprintf(conteudo + pos, "CATALOGO 1\nTABELAS %d\n", tabelas);
+            for (int i = 0; i < tabelas; i++)
+                pos += (size_t)sprintf(conteudo + pos,
+                                       "TABELA t%d 2\nCOLUNA id INT\nCOLUNA valor INT\n", i);
+            pos += (size_t)sprintf(conteudo + pos, "INDICES %d\n", MAX_INDICES);
+            for (int i = 0; i < MAX_INDICES; i++)
+                pos += (size_t)sprintf(conteudo + pos, "INDICE ix%d t%d %s\n",
+                                       i, i / 2, (i % 2) ? "valor" : "id");
+            escrever_arquivo("cheio_idx.cat", conteudo);
+            free(conteudo);
+
+            CHECK_INT(catalogo_carregar(&g_cat, "cheio_idx.cat"), 1);
+            CHECK_INT(g_cat.numero_indices, MAX_INDICES);
+        }
+    }
+}
+
+#define BASE_CAT "CATALOGO 1\nTABELAS 1\nTABELA t 2\nCOLUNA id INT\nCOLUNA nome CHAR\n"
+
+static void esperar_carga_indices_invalida(int linha, const char *conteudo, const char *trecho)
+{
+    int falhas_antes = g_falhas;
+
+    catalogo_padrao();                     /* garante que o parcial e descartado */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    escrever_arquivo("invalido_idx.cat", conteudo);
+
+    CHECK_INT(catalogo_carregar(&g_cat, "invalido_idx.cat"), -1);
+    CHECK_INT(g_cat.numero_tabelas, 0);
+    CHECK_INT(g_cat.numero_indices, 0);
+    CHECK_CONTEM(g_cat.mensagem, trecho);
+
+    if (g_falhas != falhas_antes)
+        printf("      (chamada em test_catalog.c:%d)\n", linha);
+}
+
+#define ESPERAR_INVALIDO_IDX(conteudo, trecho) \
+    esperar_carga_indices_invalida(__LINE__, conteudo, trecho)
+
+static void test_catalogo_carregar_indices_invalido(void)
+{
+    char buf[1024], nome_longo[MAX_LEXEMA + 1];
+
+    /* cabecalho da secao e quantidade */
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDEX 1\nINDICE ix t id\n", "numero de indices invalido");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES\n",                 "numero de indices invalido");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES x\n",               "numero de indices invalido");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES -1\n",              "numero de indices invalido");
+    snprintf(buf, sizeof buf, BASE_CAT "INDICES %d\n", MAX_INDICES + 1);
+    ESPERAR_INVALIDO_IDX(buf, "numero de indices invalido");
+
+    /* entrada INDICE malformada ou truncada */
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\n",                  "entrada INDICE 1 invalida");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\nINDICEX ix t id\n", "entrada INDICE 1 invalida");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\nINDICE ix t\n",     "entrada INDICE 1 invalida");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 2\nINDICE ix t id\n",  "entrada INDICE 2 invalida");
+
+    /* nome que nao cabe em MAX_LEXEMA bytes */
+    repetir(nome_longo, 'a', MAX_LEXEMA);
+    snprintf(buf, sizeof buf, BASE_CAT "INDICES 1\nINDICE %s t id\n", nome_longo);
+    ESPERAR_INVALIDO_IDX(buf, "entrada INDICE 1 invalida");
+
+    /* as regras de catalogo_registrar_indice tambem valem ao carregar */
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\nINDICE 1x t id\n",
+                         "nome de indice invalido");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\nINDICE ix fantasma id\n",
+                         "tabela 'fantasma' nao existe");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 1\nINDICE ix t idade\n",
+                         "coluna 'idade' nao existe na tabela 't'");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 2\nINDICE ix t id\nINDICE IX t nome\n",
+                         "ja existe");
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 2\nINDICE a t id\nINDICE b T ID\n",
+                         "ja possui o indice 'a'");
+
+    /* erro no 2o indice: o 1o, ja valido, tambem e descartado */
+    ESPERAR_INVALIDO_IDX(BASE_CAT "INDICES 2\nINDICE a t id\nINDICE b t idade\n",
+                         "coluna 'idade' nao existe");
+    CHECK(catalogo_buscar_indice(&g_cat, "a") == NULL);
 }
 
 /* ================================================================== */
@@ -1869,6 +2330,298 @@ static void test_executar_varias_tabelas(void)
 }
 
 /* ================================================================== */
+/* CREATE INDEX: arvore B+ do indice em disco                          */
+/* ================================================================== */
+
+static int contar_callback(const Registro *reg, void *arg)
+{
+    (void)reg;
+    (*(int *)arg)++;
+    return 0;                              /* 0 = continuar percorrendo */
+}
+
+/* Abre o arquivo de uma arvore B+ e conta os registros (-1 = falha) */
+static int contar_registros_arquivo(const char *arquivo)
+{
+    int total = 0;
+
+    if (reiniciar_cache() != 0 || configurar_arquivo(arquivo) != 0 ||
+        inicializar_arvore() != 0)
+        return -1;
+    if (percorrer_registros(contar_callback, &total) < 0)
+        return -1;
+    return total;
+}
+
+/* Grava um registro na arvore B+ do arquivo (cria a arvore se preciso) */
+static int inserir_registro_arquivo(const char *arquivo, int id, int valor)
+{
+    Registro r = registro(id, valor);
+
+    if (reiniciar_cache() != 0 || configurar_arquivo(arquivo) != 0 ||
+        inicializar_arvore() != 0)
+        return 0;
+    if (inserir_valor(&r) != INSERE_OK)
+        return 0;
+    return descarregar_todo_cache() == 0 && sincronizar_dados() == 0;
+}
+
+static void test_preparar_arvore_indice(void)
+{
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    /* indice novo: a arvore nasce vazia e vai para o disco */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    CHECK(!existe_arquivo("idx_nome.idx"));
+    CHECK_INT(preparar_arvore_indice(&g_cat, &g_cat.indices[0]), 1);
+    CHECK_INT(descarregar_todo_cache(), 0);
+    CHECK_INT(sincronizar_dados(), 0);
+    CHECK(existe_arquivo("idx_nome.idx"));
+    CHECK_INT(contar_registros_arquivo("idx_nome.idx"), 0);
+
+    /* .idx pre-existente (lixo de uma execucao interrompida) e recriado vazio */
+    CHECK(inserir_registro_arquivo("idx_lixo.idx", 7, 70));
+    CHECK_INT(contar_registros_arquivo("idx_lixo.idx"), 1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_lixo", "valor"), 1);
+    CHECK_INT(preparar_arvore_indice(&g_cat, &g_cat.indices[1]), 1);
+    CHECK_INT(descarregar_todo_cache(), 0);
+    CHECK_INT(sincronizar_dados(), 0);
+    CHECK_INT(contar_registros_arquivo("idx_lixo.idx"), 0);
+
+    /* arquivo do indice inutilizavel (e um diretorio): erro citando o indice */
+    CHECK_INT(mkdir("idx_falha.idx", 0700), 0);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "solo", "idx_falha", "id"), 1);
+    CHECK_INT(preparar_arvore_indice(&g_cat, &g_cat.indices[2]), 0);
+    CHECK_CONTEM(g_cat.mensagem, "idx_falha");
+    rmdir("idx_falha.idx");
+
+    remover_arquivos_de_indices();
+}
+
+static void test_desfazer_ultimo_indice(void)
+{
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "alunos",  "idx_nome",  "nome"),  1);
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    CHECK_INT(preparar_arvore_indice(&g_cat, &g_cat.indices[1]), 1);
+    CHECK_INT(descarregar_todo_cache(), 0);
+    CHECK_INT(sincronizar_dados(), 0);
+    CHECK(existe_arquivo("idx_valor.idx"));
+
+    /* remove so o ULTIMO indice: metadados e arquivo */
+    desfazer_ultimo_indice(&g_cat);
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_valor") == NULL);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_nome") != NULL);
+    CHECK(!existe_arquivo("idx_valor.idx"));
+
+    /* arquivo que nunca chegou a existir nao atrapalha o desfazer */
+    CHECK(!existe_arquivo("idx_nome.idx"));
+    desfazer_ultimo_indice(&g_cat);
+    CHECK_INT(g_cat.numero_indices, 0);
+
+    /* o nome fica livre para ser registrado de novo */
+    CHECK_INT(catalogo_registrar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+}
+
+static void test_criar_indice_sucesso(void)
+{
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    /* indice sobre coluna CHAR */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK_STR(g_cat.indices[0].nome, "idx_nome");
+    CHECK_STR(g_cat.indices[0].tabela, "alunos");
+    CHECK_STR(g_cat.indices[0].coluna, "nome");
+    CHECK_STR(g_cat.indices[0].arquivo, "idx_nome.idx");
+    CHECK(existe_arquivo("idx_nome.idx"));
+    CHECK_INT(contar_registros_arquivo("idx_nome.idx"), 0);   /* arvore vazia */
+
+    /* nao cria nem mexe no arquivo de dados da tabela */
+    CHECK(!existe_arquivo("alunos.dat"));
+
+    /* nomes sem diferenciar maiusculas; arquivo sempre em minusculas */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "NUMEROS", "IDX_ID", "ID"), 1);
+    CHECK_INT(g_cat.numero_indices, 2);
+    CHECK_STR(g_cat.indices[1].nome, "IDX_ID");
+    CHECK_STR(g_cat.indices[1].tabela, "numeros");
+    CHECK_STR(g_cat.indices[1].coluna, "id");
+    CHECK_INT(g_cat.indices[1].indice_coluna, 0);
+    CHECK(g_cat.indices[1].tipo_chave == TOKEN_INT);
+    CHECK_STR(g_cat.indices[1].arquivo, "idx_id.idx");
+    CHECK(existe_arquivo("idx_id.idx"));
+
+    /* outra coluna da mesma tabela */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "numeros", "idx_valor", "valor"), 1);
+    CHECK_INT(g_cat.numero_indices, 3);
+    CHECK_INT(g_cat.indices[2].indice_coluna, 1);
+    CHECK(existe_arquivo("idx_valor.idx"));
+
+    /* cada indice tem o seu arquivo: gravar em um nao afeta os outros */
+    CHECK(inserir_registro_arquivo("idx_id.idx", 1, 10));
+    CHECK_INT(contar_registros_arquivo("idx_id.idx"), 1);
+    CHECK_INT(contar_registros_arquivo("idx_nome.idx"), 0);
+    CHECK_INT(contar_registros_arquivo("idx_valor.idx"), 0);
+
+    remover_arquivos_de_indices();
+}
+
+static void test_criar_indice_erros(void)
+{
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    /* validacoes: nada e registrado e nenhum arquivo e criado */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "fantasma", "idx_nome", "id"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "tabela 'fantasma' nao existe");
+    CHECK(!existe_arquivo("idx_nome.idx"));
+
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "idx_nome", "idade"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "coluna 'idade' nao existe na tabela 'alunos'");
+    CHECK(!existe_arquivo("idx_nome.idx"));
+
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "1x", "nome"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "nome de indice invalido");
+    CHECK(!existe_arquivo("1x.idx"));
+    CHECK_INT(g_cat.numero_indices, 0);
+
+    /* um indice valido, ja com conteudo na arvore */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "idx_nome", "nome"), 1);
+    CHECK(inserir_registro_arquivo("idx_nome.idx", 5, 50));
+
+    /* nome repetido: erro e a arvore do indice original continua intacta */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "numeros", "IDX_NOME", "valor"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "ja existe");
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK_INT(contar_registros_arquivo("idx_nome.idx"), 1);
+
+    /* mesma coluna: erro e nenhum arquivo novo */
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "outro", "nome"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "ja possui o indice 'idx_nome'");
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK(!existe_arquivo("outro.idx"));
+    CHECK_INT(contar_registros_arquivo("idx_nome.idx"), 1);
+
+    remover_arquivos_de_indices();
+}
+
+static void test_criar_indice_desfaz_se_disco_falha(void)
+{
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+    catalogo_padrao();
+
+    /* o caminho do arquivo do indice esta ocupado por um diretorio */
+    CHECK_INT(mkdir("idx_dir.idx", 0700), 0);
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "idx_dir", "nome"), 0);
+    CHECK_CONTEM(g_cat.mensagem, "idx_dir");
+    CHECK_INT(g_cat.numero_indices, 0);                       /* registro desfeito */
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_dir") == NULL);
+
+    /* com o caminho livre, o mesmo indice pode ser criado */
+    rmdir("idx_dir.idx");
+    CHECK_INT(catalogo_criar_indice(&g_cat, "alunos", "idx_dir", "nome"), 1);
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK(existe_arquivo("idx_dir.idx"));
+
+    remover_arquivos_de_indices();
+}
+
+static void test_executar_create_index(void)
+{
+    int ok;
+    const char *saida;
+
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+    catalogo_iniciar(&g_cat);
+
+    cmd_iniciar(CMD_CREATE, "alunos");
+    cmd_coluna("id", TOKEN_INT);
+    cmd_coluna("nome", TOKEN_CHAR);
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 1);
+    inserir_aluno(1, "Ana", 1);
+    inserir_aluno(2, "Bia", 1);
+
+    /* sucesso: registra o indice e cria o arquivo da arvore */
+    cmd_iniciar(CMD_CREATE_INDEX, "alunos");
+    cmd_indice("idx_nome", "nome");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 1);
+    CHECK_INT(g_cat.numero_indices, 1);
+    CHECK(catalogo_buscar_indice(&g_cat, "idx_nome") != NULL);
+    CHECK(existe_arquivo("idx_nome.idx"));
+
+    /* nomes sem diferenciar maiusculas */
+    cmd_iniciar(CMD_CREATE_INDEX, "ALUNOS");
+    cmd_indice("IDX_ID", "ID");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 1);
+    CHECK_INT(g_cat.numero_indices, 2);
+    CHECK_STR(g_cat.indices[1].tabela, "alunos");
+    CHECK_STR(g_cat.indices[1].coluna, "id");
+    CHECK(existe_arquivo("idx_id.idx"));
+
+    /* nome de indice repetido */
+    cmd_iniciar(CMD_CREATE_INDEX, "alunos");
+    cmd_indice("idx_nome", "id");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 0);
+    CHECK_CONTEM(g_cat.mensagem, "ja existe");
+
+    /* coluna que ja tem indice */
+    cmd_iniciar(CMD_CREATE_INDEX, "alunos");
+    cmd_indice("outro", "nome");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 0);
+    CHECK_CONTEM(g_cat.mensagem, "ja possui o indice 'idx_nome'");
+
+    /* tabela e coluna inexistentes */
+    cmd_iniciar(CMD_CREATE_INDEX, "fantasma");
+    cmd_indice("idx_f", "id");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 0);
+    CHECK_CONTEM(g_cat.mensagem, "tabela 'fantasma' nao existe");
+
+    cmd_iniciar(CMD_CREATE_INDEX, "alunos");
+    cmd_indice("idx_f", "idade");
+    CHECK_INT(catalogo_executar(&g_cat, &g_cmd), 0);
+    CHECK_CONTEM(g_cat.mensagem, "coluna 'idade' nao existe");
+
+    CHECK_INT(g_cat.numero_indices, 2);                       /* so os 2 validos */
+    CHECK(!existe_arquivo("idx_f.idx"));
+    CHECK(!existe_arquivo("outro.idx"));
+
+    /* os dados da tabela nao foram afetados e INSERT/SELECT continuam funcionando */
+    cmd_iniciar(CMD_SELECT, "alunos");
+    saida = rodar_select(&ok);
+    CHECK_INT(ok, 1);
+    CHECK_CONTEM(saida, "2 registro(s) encontrado(s).");
+    CHECK_CONTEM(saida, "  1 | 'Ana'");
+    CHECK_CONTEM(saida, "  2 | 'Bia'");
+
+    inserir_aluno(3, "Caio", 1);
+    cmd_iniciar(CMD_SELECT, "alunos");
+    saida = rodar_select(&ok);
+    CHECK_INT(ok, 1);
+    CHECK_CONTEM(saida, "3 registro(s) encontrado(s).");
+
+    /* o catalogo com indices sobrevive a salvar + carregar */
+    CHECK_INT(catalogo_salvar(&g_cat, "cat_exec_idx.cat"), 1);
+    CHECK_INT(catalogo_carregar(&g_cat2, "cat_exec_idx.cat"), 1);
+    CHECK_INT(g_cat2.numero_indices, 2);
+    CHECK_STR(g_cat2.indices[0].nome, "idx_nome");
+    CHECK_STR(g_cat2.indices[1].nome, "IDX_ID");
+    CHECK_INT(contar_registros_arquivo(g_cat2.indices[0].arquivo), 0);
+
+    remover_arquivos_de_dados();
+    remover_arquivos_de_indices();
+}
+
+/* ================================================================== */
 /* main                                                                */
 /* ================================================================== */
 
@@ -1906,6 +2659,13 @@ int main(void)
     RODAR(test_adicionar_tabela_colunas_invalidas);
     RODAR(test_adicionar_tabela_restricoes_fisicas);
 
+    /* CREATE INDEX: metadados */
+    RODAR(test_montar_nome_arquivo_indice);
+    RODAR(test_catalogo_buscar_indice);
+    RODAR(test_registrar_indice_sucesso);
+    RODAR(test_registrar_indice_erros);
+    RODAR(test_registrar_indice_limite);
+
     /* analise semantica */
     RODAR(test_valor_compativel);
     RODAR(test_validar_insert);
@@ -1926,6 +2686,7 @@ int main(void)
     RODAR(test_callback_select);
     RODAR(test_imprimir_tabela);
     RODAR(test_catalogo_imprimir);
+    RODAR(test_catalogo_imprimir_indices);
 
     /* persistencia do catalogo */
     RODAR(test_catalogo_salvar);
@@ -1936,6 +2697,10 @@ int main(void)
     RODAR(test_catalogo_carregar_ida_e_volta);
     RODAR(test_catalogo_carregar_casos_especiais);
     RODAR(test_catalogo_carregar_invalido);
+    RODAR(test_catalogo_salvar_indices);
+    RODAR(test_catalogo_carregar_indices_ida_e_volta);
+    RODAR(test_catalogo_carregar_indices_casos_especiais);
+    RODAR(test_catalogo_carregar_indices_invalido);
 
     /* execucao de comandos (usa Cache / Pager / Arvore B+ de verdade) */
     RODAR(test_selecionar_arquivo_tabela);
@@ -1944,6 +2709,14 @@ int main(void)
     RODAR(test_executar_insert);
     RODAR(test_executar_select);
     RODAR(test_executar_varias_tabelas);
+
+    /* CREATE INDEX: arvore B+ em disco e execucao do comando */
+    RODAR(test_preparar_arvore_indice);
+    RODAR(test_desfazer_ultimo_indice);
+    RODAR(test_criar_indice_sucesso);
+    RODAR(test_criar_indice_erros);
+    RODAR(test_criar_indice_desfaz_se_disco_falha);
+    RODAR(test_executar_create_index);
 
     printf("\n%d verificacao(oes), %d falha(s)\n", g_verificacoes, g_falhas);
     printf("%s\n", g_falhas == 0 ? "TODOS OS TESTES PASSARAM" : "HA TESTES FALHANDO");
